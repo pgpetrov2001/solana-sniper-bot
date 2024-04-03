@@ -26,7 +26,7 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { getTokenAccounts, RAYDIUM_LIQUIDITY_PROGRAM_ID_V4, OPENBOOK_PROGRAM_ID, createPoolKeys } from './liquidity';
-import { logger } from './utils';
+import { logger, fileExists, Mutex } from './utils';
 import { getMinimalMarketV3, MinimalMarketLayoutV3 } from './market';
 import { MintLayout } from './types';
 import bs58 from 'bs58';
@@ -50,7 +50,13 @@ import {
   MIN_POOL_SIZE,
   MAX_POOL_SIZE,
   ONE_TOKEN_AT_A_TIME,
+  POOLS_SAVE_FILE,
 } from './constants';
+import {
+	sell
+} from "./sell";
+import { setTimeout } from "timers/promises";
+import { readFile, writeFile } from "fs/promises";
 
 const solanaConnection = new Connection(RPC_ENDPOINT, {
   wsEndpoint: RPC_WEBSOCKET_ENDPOINT,
@@ -66,6 +72,8 @@ export interface MinimalTokenAccountData {
 const existingLiquidityPools: Set<string> = new Set<string>();
 const existingOpenBookMarkets: Set<string> = new Set<string>();
 const existingTokenAccounts: Map<string, MinimalTokenAccountData> = new Map<string, MinimalTokenAccountData>();
+const holdingMints: Set<string> = new Set<string>();
+const poolsSaveFileMutex: Mutex = new Mutex();
 
 let wallet: Keypair;
 let quoteToken: Token;
@@ -142,10 +150,35 @@ async function init(): Promise<void> {
     throw new Error(`No ${quoteToken.symbol} token account found in wallet: ${wallet.publicKey}`);
   }
 
+  logger.info(`${quoteToken.symbol} balance: ${tokenAccount.accountInfo.amount.toNumber()}`);
+
   quoteTokenAssociatedAddress = tokenAccount.pubkey;
 
   // load tokens to snipe
   loadSnipeList();
+
+  if (process.argv[2] == 'sell') {
+	const liquidityPoolAddress = process.argv[3];
+	if (liquidityPoolAddress == null) {
+		logger.error('Liquidity pool address not specified');
+		process.exit(1);
+	}
+	let { data } = (await solanaConnection.getAccountInfo(new PublicKey(liquidityPoolAddress))) || {};
+	if (!data) process.exit(1);
+	const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(data);
+	let tokenAccount = existingTokenAccounts.get(poolState.baseMint.toString()) as MinimalTokenAccountData;
+	({ data } = (await solanaConnection.getAccountInfo(tokenAccount.address)) || {});
+	if (!data) process.exit(1);
+	const accountInfo = AccountLayout.decode(data);
+    const market = await getMinimalMarketV3(solanaConnection, poolState.marketId, COMMITMENT_LEVEL);
+    tokenAccount = saveTokenAccount(poolState.baseMint, market);
+    tokenAccount.poolKeys = createPoolKeys(new PublicKey(liquidityPoolAddress), poolState, tokenAccount.market!);
+	sell(solanaConnection, wallet, quoteTokenAssociatedAddress, tokenAccount.mint, tokenAccount, accountInfo.amount)
+	.then((sold) => {
+		const ret: number = Number(!sold);
+		process.exit(ret);
+	});
+  }
 }
 
 function saveTokenAccount(mint: PublicKey, accountData: MinimalMarketLayoutV3) {
@@ -212,6 +245,13 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
     }
   }
 
+  const res = await fetch(`https://api.rugcheck.xyz/v1/tokens/${poolState.baseMint.toString()}/report`);
+  const data = await res.json();
+  if (JSON.stringify(data).includes('danger')) {
+  	logger.warn({ mint: poolState.baseMint }, `Skipping, danger included in rugcheck!`);
+  	return;
+  }
+
   await buy(id, poolState);
 }
 
@@ -224,7 +264,7 @@ export async function checkMintable(vault: PublicKey): Promise<boolean | undefin
     const deserialize = MintLayout.decode(data);
     return deserialize.mintAuthorityOption === 0;
   } catch (e) {
-    logger.debug(e);
+    logger.error(e);
     logger.error({ mint: vault }, `Failed to check if mint is renounced`);
   }
 }
@@ -241,7 +281,7 @@ export async function processOpenBookMarket(updatedAccountInfo: KeyedAccountInfo
 
     saveTokenAccount(accountData.baseMint, accountData);
   } catch (e) {
-    logger.debug(e);
+    logger.error(e);
     logger.error({ mint: accountData?.baseMint }, `Failed to process market`);
   }
 }
@@ -294,9 +334,8 @@ async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise
     const signature = await solanaConnection.sendRawTransaction(transaction.serialize(), {
       preflightCommitment: COMMITMENT_LEVEL,
     });
-    logger.info({ mint: accountData.baseMint, signature }, `Sent buy tx`);
+    logger.info({ mint: accountData.baseMint, signature, holdingTokens: holdingMints.size }, `Sent buy tx`);
     processingToken = true;
-
     const confirmation = await solanaConnection.confirmTransaction(
       {
         signature,
@@ -311,119 +350,22 @@ async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise
         {
           mint: accountData.baseMint,
           signature,
+		  holdingTokens: holdingMints.size,
           url: `https://solscan.io/tx/${signature}?cluster=${NETWORK}`,
         },
         `Confirmed buy tx`,
       );
+	  holdingMints.add(accountData.baseMint.toString());
+	  savePoolInStorage(accountId, accountData.baseMint);
     } else {
-      logger.debug(confirmation.value.err);
+      logger.error(confirmation.value.err);
       logger.info({ mint: accountData.baseMint, signature }, `Error confirming buy tx`);
     }
   } catch (e) {
-    logger.debug(e);
+    logger.error(e);
     processingToken = false;
     logger.error({ mint: accountData.baseMint }, `Failed to buy token`);
   }
-}
-
-async function sell(accountId: PublicKey, mint: PublicKey, amount: BigNumberish): Promise<void> {
-  let sold = false;
-  let retries = 0;
-
-  if (AUTO_SELL_DELAY > 0) {
-    await new Promise((resolve) => setTimeout(resolve, AUTO_SELL_DELAY));
-  }
-
-  do {
-    try {
-      const tokenAccount = existingTokenAccounts.get(mint.toString());
-
-      if (!tokenAccount) {
-        return;
-      }
-
-      if (!tokenAccount.poolKeys) {
-        logger.warn({ mint }, 'No pool keys found');
-        return;
-      }
-
-      if (amount === 0) {
-        logger.info(
-          {
-            mint: tokenAccount.mint,
-          },
-          `Empty balance, can't sell`,
-        );
-        return;
-      }
-
-      const { innerTransaction } = Liquidity.makeSwapFixedInInstruction(
-        {
-          poolKeys: tokenAccount.poolKeys!,
-          userKeys: {
-            tokenAccountOut: quoteTokenAssociatedAddress,
-            tokenAccountIn: tokenAccount.address,
-            owner: wallet.publicKey,
-          },
-          amountIn: amount,
-          minAmountOut: 0,
-        },
-        tokenAccount.poolKeys!.version,
-      );
-
-      const latestBlockhash = await solanaConnection.getLatestBlockhash({
-        commitment: COMMITMENT_LEVEL,
-      });
-      const messageV0 = new TransactionMessage({
-        payerKey: wallet.publicKey,
-        recentBlockhash: latestBlockhash.blockhash,
-        instructions: [
-          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 421197 }),
-          ComputeBudgetProgram.setComputeUnitLimit({ units: 101337 }),
-          ...innerTransaction.instructions,
-          createCloseAccountInstruction(tokenAccount.address, wallet.publicKey, wallet.publicKey),
-        ],
-      }).compileToV0Message();
-      const transaction = new VersionedTransaction(messageV0);
-      transaction.sign([wallet, ...innerTransaction.signers]);
-      const signature = await solanaConnection.sendRawTransaction(transaction.serialize(), {
-        preflightCommitment: COMMITMENT_LEVEL,
-      });
-      logger.info({ mint, signature }, `Sent sell tx`);
-      const confirmation = await solanaConnection.confirmTransaction(
-        {
-          signature,
-          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-          blockhash: latestBlockhash.blockhash,
-        },
-        COMMITMENT_LEVEL,
-      );
-      if (confirmation.value.err) {
-        logger.debug(confirmation.value.err);
-        logger.info({ mint, signature }, `Error confirming sell tx`);
-        continue;
-      }
-      logger.info(`-------------------🔴------------------- `);
-      logger.info(
-        {
-          dex: `https://dexscreener.com/solana/${mint}?maker=${wallet.publicKey}`,
-          mint,
-          signature,
-          url: `https://solscan.io/tx/${signature}?cluster=${NETWORK}`,
-        },
-        `Confirmed sell tx`,
-      );
-      sold = true;
-      processingToken = false;
-    } catch (e: any) {
-      // wait for a bit before retrying
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      retries++;
-      logger.debug(e);
-      logger.error({ mint }, `Failed to sell token, retry: ${retries}/${MAX_SELL_RETRIES}`);
-    }
-  } while (!sold && retries < MAX_SELL_RETRIES);
-  processingToken = false;
 }
 
 function loadSnipeList() {
@@ -441,6 +383,32 @@ function loadSnipeList() {
   if (snipeList.length != count) {
     logger.info(`Loaded snipe list: ${snipeList.length}`);
   }
+}
+
+async function savePoolInStorage(poolAccountAddress: PublicKey, tokenMintAddress: PublicKey) {
+	await poolsSaveFileMutex.lock(async () => {
+		try {
+			let savedPools: { [key: string]: string } = {};
+			if (await fileExists(POOLS_SAVE_FILE)) {
+				const data = await readFile(POOLS_SAVE_FILE, { encoding: 'utf8' });
+				savedPools = JSON.parse(data);
+			}
+			let toDelete = [];
+			for (const accountAddress in savedPools) {
+				const mint = savedPools[accountAddress];
+				if (!holdingMints.has(mint)) {
+					toDelete.push(accountAddress);
+				}
+			}
+			for (const address of toDelete) {
+				delete savedPools[address];
+			}
+			savedPools[poolAccountAddress.toString()] = tokenMintAddress.toString();
+			await writeFile(POOLS_SAVE_FILE, JSON.stringify(savedPools));
+		} catch(err) {
+			logger.error({ err }, "Failed while trying save pool in pools save file.");
+		}
+	});
 }
 
 function shouldBuy(key: string): boolean {
@@ -512,6 +480,8 @@ const runListener = async () => {
   );
 
   if (AUTO_SELL) {
+	  // listen for the event of the wSOL being transferred away from the account
+	  // and afterwards sell it after the specified delay
     const walletSubscriptionId = solanaConnection.onProgramAccountChange(
       TOKEN_PROGRAM_ID,
       async (updatedAccountInfo) => {
@@ -521,7 +491,18 @@ const runListener = async () => {
           return;
         }
 
-        const _ = sell(updatedAccountInfo.accountId, accountData.mint, accountData.amount);
+		if (AUTO_SELL_DELAY > 0) {
+			await setTimeout(AUTO_SELL_DELAY);
+		}
+		const tokenAccount = existingTokenAccounts.get(accountData.mint.toString()) as MinimalTokenAccountData;
+        sell(solanaConnection, wallet, quoteTokenAssociatedAddress, accountData.mint, tokenAccount, accountData.amount)
+			.then((sold) => {
+				processingToken = false;
+				if (!sold) return false;
+				holdingMints.delete(accountData.mint.toString());
+				logger.info(`Now holding ${holdingMints.size} tokens`);
+				return true;
+			});
       },
       COMMITMENT_LEVEL,
       [
@@ -552,4 +533,11 @@ const runListener = async () => {
   }
 };
 
-runListener();
+if (process.argv.includes('sell')) {
+	(async () => {
+		init();
+		await setTimeout(120 * 1000);
+	})();
+} else {
+	runListener();
+}
