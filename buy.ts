@@ -346,6 +346,7 @@ async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise
     );
     if (!confirmation.value.err) {
       logger.info(`-------------------🟢------------------- `);
+	  holdingMints.add(accountData.baseMint.toString());
       logger.info(
         {
           mint: accountData.baseMint,
@@ -355,7 +356,6 @@ async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise
         },
         `Confirmed buy tx`,
       );
-	  holdingMints.add(accountData.baseMint.toString());
 	  savePoolInStorage(accountId, accountData.baseMint);
     } else {
       logger.error(confirmation.value.err);
