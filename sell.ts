@@ -1,9 +1,11 @@
 import {
   BigNumberish,
   Liquidity,
+  LIQUIDITY_STATE_LAYOUT_V4,
 } from '@raydium-io/raydium-sdk';
 import {
   createCloseAccountInstruction,
+  AccountLayout,
 } from '@solana/spl-token';
 import {
   Keypair,
@@ -14,6 +16,8 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 
+import { getMinimalMarketV3 } from './market';
+import { createPoolKeys } from './liquidity';
 import { logger } from './utils';
 
 import {
@@ -24,6 +28,8 @@ import {
 
 import {
 	MinimalTokenAccountData,
+	saveTokenAccount,
+	existingTokenAccounts,
 } from "./buy";
 
 import { setTimeout } from "timers/promises";
@@ -119,4 +125,18 @@ export async function sell(solanaConnection: Connection, wallet: Keypair, quoteT
     }
   } while (!sold && retries < MAX_SELL_RETRIES);
   return sold;
+}
+
+export async function sellTokenFundsFromLPAddress(lpAccount: PublicKey, solanaConnection: Connection, wallet: Keypair, quoteTokenAssociatedAddress: PublicKey): Promise<boolean> {
+	let { data } = (await solanaConnection.getAccountInfo(lpAccount)) || {};
+	if (!data) process.exit(1);
+	const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(data);
+	let tokenAccount = existingTokenAccounts.get(poolState.baseMint.toString()) as MinimalTokenAccountData;
+	({ data } = (await solanaConnection.getAccountInfo(tokenAccount.address)) || {});
+	if (!data) process.exit(1);
+	const accountInfo = AccountLayout.decode(data);
+    const market = await getMinimalMarketV3(solanaConnection, poolState.marketId, COMMITMENT_LEVEL);
+    tokenAccount = saveTokenAccount(poolState.baseMint, market);
+    tokenAccount.poolKeys = createPoolKeys(lpAccount, poolState, tokenAccount.market!);
+	return await sell(solanaConnection, wallet, quoteTokenAssociatedAddress, tokenAccount.mint, tokenAccount, accountInfo.amount);
 }

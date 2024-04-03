@@ -33,7 +33,7 @@ import bs58 from 'bs58';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  AUTO_SELL,
+  SELL_MODE,
   AUTO_SELL_DELAY,
   CHECK_IF_MINT_IS_RENOUNCED,
   COMMITMENT_LEVEL,
@@ -51,9 +51,11 @@ import {
   MAX_POOL_SIZE,
   ONE_TOKEN_AT_A_TIME,
   POOLS_SAVE_FILE,
+  INTER_BUY_DELAY,
 } from './constants';
 import {
-	sell
+	sell,
+	sellTokenFundsFromLPAddress,
 } from "./sell";
 import { setTimeout } from "timers/promises";
 import { readFile, writeFile } from "fs/promises";
@@ -71,7 +73,7 @@ export interface MinimalTokenAccountData {
 
 const existingLiquidityPools: Set<string> = new Set<string>();
 const existingOpenBookMarkets: Set<string> = new Set<string>();
-const existingTokenAccounts: Map<string, MinimalTokenAccountData> = new Map<string, MinimalTokenAccountData>();
+export const existingTokenAccounts: Map<string, MinimalTokenAccountData> = new Map<string, MinimalTokenAccountData>();
 const holdingMints: Set<string> = new Set<string>();
 const poolsSaveFileMutex: Mutex = new Mutex();
 
@@ -82,7 +84,7 @@ let quoteAmount: TokenAmount;
 let quoteMinPoolSizeAmount: TokenAmount;
 let quoteMaxPoolSizeAmount: TokenAmount;
 let processingToken: Boolean = false;
-
+let lastBuy: Date = new Date();
 
 
 let snipeList: string[] = [];
@@ -131,7 +133,7 @@ async function init(): Promise<void> {
   );
   logger.info(`One token at a time: ${ONE_TOKEN_AT_A_TIME}`);
   logger.info(`Buy amount: ${quoteAmount.toFixed()} ${quoteToken.symbol}`);
-  logger.info(`Auto sell: ${AUTO_SELL}`);
+  logger.info(`Sell mode: ${SELL_MODE}`);
   logger.info(`Sell delay: ${AUTO_SELL_DELAY === 0 ? 'false' : AUTO_SELL_DELAY}`);
 
   // check existing wallet for associated token account of quote mint
@@ -163,25 +165,12 @@ async function init(): Promise<void> {
 		logger.error('Liquidity pool address not specified');
 		process.exit(1);
 	}
-	let { data } = (await solanaConnection.getAccountInfo(new PublicKey(liquidityPoolAddress))) || {};
-	if (!data) process.exit(1);
-	const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(data);
-	let tokenAccount = existingTokenAccounts.get(poolState.baseMint.toString()) as MinimalTokenAccountData;
-	({ data } = (await solanaConnection.getAccountInfo(tokenAccount.address)) || {});
-	if (!data) process.exit(1);
-	const accountInfo = AccountLayout.decode(data);
-    const market = await getMinimalMarketV3(solanaConnection, poolState.marketId, COMMITMENT_LEVEL);
-    tokenAccount = saveTokenAccount(poolState.baseMint, market);
-    tokenAccount.poolKeys = createPoolKeys(new PublicKey(liquidityPoolAddress), poolState, tokenAccount.market!);
-	sell(solanaConnection, wallet, quoteTokenAssociatedAddress, tokenAccount.mint, tokenAccount, accountInfo.amount)
-	.then((sold) => {
-		const ret: number = Number(!sold);
-		process.exit(ret);
-	});
+	const sold = await sellTokenFundsFromLPAddress(new PublicKey(liquidityPoolAddress), solanaConnection, wallet, quoteTokenAssociatedAddress);
+	process.exit(Number(!sold));
   }
 }
 
-function saveTokenAccount(mint: PublicKey, accountData: MinimalMarketLayoutV3) {
+export function saveTokenAccount(mint: PublicKey, accountData: MinimalMarketLayoutV3) {
   const ata = getAssociatedTokenAddressSync(mint, wallet.publicKey);
   const tokenAccount = <MinimalTokenAccountData>{
     address: ata,
@@ -357,6 +346,14 @@ async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise
         `Confirmed buy tx`,
       );
 	  savePoolInStorage(accountId, accountData.baseMint);
+	  if (SELL_MODE === 'direct') {
+		  const sold = await sellTokenFundsFromLPAddress(accountId, solanaConnection, wallet, quoteTokenAssociatedAddress);
+		  processingToken = false;
+		  if (sold) {
+			  holdingMints.delete(accountData.baseMint.toString());
+			  logger.info(`Now holding ${holdingMints.size} tokens`);
+		  }
+	  }
     } else {
       logger.error(confirmation.value.err);
       logger.info({ mint: accountData.baseMint, signature }, `Error confirming buy tx`);
@@ -479,7 +476,7 @@ const runListener = async () => {
     ],
   );
 
-  if (AUTO_SELL) {
+  if (SELL_MODE === 'auto') {
 	  // listen for the event of the wSOL being transferred away from the account
 	  // and afterwards sell it after the specified delay
     const walletSubscriptionId = solanaConnection.onProgramAccountChange(
@@ -495,7 +492,7 @@ const runListener = async () => {
 			await setTimeout(AUTO_SELL_DELAY);
 		}
 		const tokenAccount = existingTokenAccounts.get(accountData.mint.toString()) as MinimalTokenAccountData;
-        sell(solanaConnection, wallet, quoteTokenAssociatedAddress, accountData.mint, tokenAccount, accountData.amount)
+        const sold = await sell(solanaConnection, wallet, quoteTokenAssociatedAddress, accountData.mint, tokenAccount, accountData.amount)
 			.then((sold) => {
 				processingToken = false;
 				if (!sold) return false;
