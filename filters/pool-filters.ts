@@ -21,7 +21,7 @@ export interface PoolFilterArgs {
 }
 
 export class PoolFilters {
-	private readonly filters: Filter[] = [];
+	private filters: Filter[] = [];
 
 	constructor(
 		readonly connection: Connection,
@@ -46,7 +46,14 @@ export class PoolFilters {
 		}
 
 		const result = await Promise.all(this.filters.map((f) => f.execute(poolKeys)));
-		const pass = result.every((r) => r.ok);
+		const passed = result.map((r) => r.ok);
+		this.filters = this.filters.filter((f, i) => {
+			if (f instanceof RenouncedFilter) {
+				return !passed[i];
+			}
+			return true;
+		});
+		const pass = passed.every((p) => p);
 
 		if (pass) {
 			return true;
@@ -55,6 +62,7 @@ export class PoolFilters {
 		for (const filterResult of result.filter((r) => !r.ok)) {
 			logger.trace(filterResult.message);
 		}
+		logger.trace(`Filters remaining: ${this.filters.length}`);
 
 		return false;
 	}
