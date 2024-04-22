@@ -50,6 +50,8 @@ export interface BotConfig {
 	filterCheckInterval: number;
 	filterCheckDuration: number;
 	consecutiveMatchCount: number;
+	sellSkipPreflight: boolean;
+	buySkipPreflight: boolean;
 }
 
 export class Bot {
@@ -342,7 +344,8 @@ export class Bot {
 		const transaction = new VersionedTransaction(messageV0);
 		transaction.sign([wallet, ...innerTransaction.signers]);
 
-		return this.txExecutor.executeAndConfirm(transaction, wallet, latestBlockhash);
+		const skipPreflight = { buy: this.config.buySkipPreflight, sell: this.config.sellSkipPreflight }[direction];
+		return this.txExecutor.executeAndConfirm(transaction, wallet, latestBlockhash, skipPreflight);
 	}
 
 	private async filterMatch(poolKeys: LiquidityPoolKeysV4) {

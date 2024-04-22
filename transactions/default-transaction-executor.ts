@@ -15,17 +15,19 @@ export class DefaultTransactionExecutor implements TransactionExecutor {
 		transaction: VersionedTransaction,
 		payer: Keypair,
 		latestBlockhash: BlockhashWithExpiryBlockHeight,
+		skipPreflight: boolean,
 	): Promise<{ confirmed: boolean; signature?: string }> {
 		logger.debug('Executing transaction...');
-		const signature = await this.execute(transaction);
+		const signature = await this.execute(transaction, skipPreflight);
 
 		logger.debug({ signature }, 'Confirming transaction...');
 		return this.confirm(signature, latestBlockhash);
 	}
 
-	private async execute(transaction: Transaction | VersionedTransaction) {
+	private async execute(transaction: Transaction | VersionedTransaction, skipPreflight: boolean) {
 		return this.connection.sendRawTransaction(transaction.serialize(), {
 			preflightCommitment: this.connection.commitment,
+			skipPreflight,
 		});
 	}
 

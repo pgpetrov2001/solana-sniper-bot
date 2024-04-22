@@ -39,6 +39,7 @@ export const QUOTE_MINT = retrieveEnvVariable('QUOTE_MINT', logger);
 export const QUOTE_AMOUNT = retrieveEnvVariable('QUOTE_AMOUNT', logger);
 export const MAX_BUY_RETRIES = Number(retrieveEnvVariable('MAX_BUY_RETRIES', logger));
 export const BUY_SLIPPAGE = Number(retrieveEnvVariable('BUY_SLIPPAGE', logger));
+export const BUY_SKIP_PREFLIGHT = retrieveEnvVariable('BUY_SKIP_PREFLIGHT', logger) === 'true';
 
 // Sell
 export const AUTO_SELL = retrieveEnvVariable('AUTO_SELL', logger) === 'true';
@@ -49,6 +50,7 @@ export const STOP_LOSS = Number(retrieveEnvVariable('STOP_LOSS', logger));
 export const PRICE_CHECK_INTERVAL = Number(retrieveEnvVariable('PRICE_CHECK_INTERVAL', logger));
 export const PRICE_CHECK_DURATION = Number(retrieveEnvVariable('PRICE_CHECK_DURATION', logger));
 export const SELL_SLIPPAGE = Number(retrieveEnvVariable('SELL_SLIPPAGE', logger));
+export const SELL_SKIP_PREFLIGHT = retrieveEnvVariable('SELL_SKIP_PREFLIGHT', logger) === 'true';
 
 // Filters
 export const FILTER_CHECK_INTERVAL = Number(retrieveEnvVariable('FILTER_CHECK_INTERVAL', logger));

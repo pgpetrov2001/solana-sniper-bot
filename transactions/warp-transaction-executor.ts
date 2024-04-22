@@ -21,6 +21,7 @@ export class WarpTransactionExecutor implements TransactionExecutor {
 		transaction: VersionedTransaction,
 		payer: Keypair,
 		latestBlockhash: BlockhashWithExpiryBlockHeight,
+		skipPreflight: boolean,
 	): Promise<{ confirmed: boolean; signature?: string }> {
 		logger.debug('Executing transaction...');
 

@@ -43,6 +43,8 @@ import {
 	FILTER_CHECK_INTERVAL,
 	FILTER_CHECK_DURATION,
 	CONSECUTIVE_FILTER_MATCHES,
+	SELL_SKIP_PREFLIGHT,
+	BUY_SKIP_PREFLIGHT,
 } from './helpers';
 import { version } from './package.json';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
@@ -172,6 +174,8 @@ const runListener = async () => {
 		filterCheckInterval: FILTER_CHECK_INTERVAL,
 		filterCheckDuration: FILTER_CHECK_DURATION,
 		consecutiveMatchCount: CONSECUTIVE_FILTER_MATCHES,
+		sellSkipPreflight: SELL_SKIP_PREFLIGHT,
+		buySkipPreflight: BUY_SKIP_PREFLIGHT,
 	};
 
 	const bot = new Bot(connection, marketCache, poolCache, txExecutor, botConfig);
