@@ -6,12 +6,12 @@ import { logger } from './logger';
 dotenv.config();
 
 const retrieveEnvVariable = (variableName: string, logger: Logger) => {
-	const variable = process.env[variableName] || '';
-	if (!variable) {
-		logger.error(`${variableName} is not set`);
-		process.exit(1);
-	}
-	return variable;
+  const variable = process.env[variableName] || '';
+  if (!variable) {
+    logger.error(`${variableName} is not set`);
+    process.exit(1);
+  }
+  return variable;
 };
 
 // Wallet
