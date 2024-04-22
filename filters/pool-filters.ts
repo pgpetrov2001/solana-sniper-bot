@@ -48,7 +48,7 @@ export class PoolFilters {
 		const result = await Promise.all(this.filters.map((f) => f.execute(poolKeys)));
 		const passed = result.map((r) => r.ok);
 		this.filters = this.filters.filter((f, i) => {
-			if (f instanceof RenouncedFilter) {
+			if (f instanceof RenouncedFreezeFilter) {
 				return !passed[i];
 			}
 			return true;
@@ -60,7 +60,7 @@ export class PoolFilters {
 		}
 
 		for (const filterResult of result.filter((r) => !r.ok)) {
-			logger.trace(filterResult.message);
+			logger.trace({ mint: poolKeys.baseMint }, filterResult.message);
 		}
 		logger.trace(`Filters remaining: ${this.filters.length}`);
 

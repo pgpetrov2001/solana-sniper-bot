@@ -62,7 +62,8 @@ export class Bot {
 	private readonly snipeListCache?: SnipeListCache;
 
 	// one token at the time
-	private readonly mutex: Mutex;
+	private readonly buyMutex: Mutex;
+	private readonly sellMutex: Mutex;
 	private sellExecutionCount = 0;
 	public readonly isWarp: boolean = false;
 
@@ -75,7 +76,8 @@ export class Bot {
 	) {
 		this.isWarp = txExecutor instanceof WarpTransactionExecutor;
 
-		this.mutex = new Mutex();
+		this.buyMutex = new Mutex();
+		this.sellMutex = new Mutex();
 		this.poolFilters = new PoolFilters(connection, {
 			quoteToken: this.config.quoteToken,
 			minPoolSize: this.config.minPoolSize,
@@ -101,103 +103,111 @@ export class Bot {
 		return true;
 	}
 
-	public async buy(accountId: PublicKey, poolState: LiquidityStateV4) {
-		logger.trace({ mint: poolState.baseMint }, `Processing new pool...`);
+	public async approveToken(poolKeys: LiquidityPoolKeysV4) {
+		if (!this.config.useSnipeList) {
+			const match = await this.filterMatch(poolKeys);
 
-		if (this.config.useSnipeList && !this.snipeListCache?.isInList(poolState.baseMint.toString())) {
-			logger.debug({ mint: poolState.baseMint.toString() }, `Skipping buy because token is not in a snipe list`);
-			return;
+			if (!match) {
+				logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters`);
+				return false;
+			}
 		}
+		return true;
+	}
 
-		if (this.config.autoBuyDelay > 0) {
-			logger.debug({ mint: poolState.baseMint }, `Waiting for ${this.config.autoBuyDelay} ms before buy`);
-			await sleep(this.config.autoBuyDelay);
-		}
+	public async proposeBuy(accountId: PublicKey, poolState: LiquidityStateV4): Promise<boolean> {
+		try {
+			logger.trace({ mint: poolState.baseMint }, `Processing new pool...`);
 
-		if (this.config.oneTokenAtATime) {
-			if (this.mutex.isLocked() || this.sellExecutionCount > 0) {
-				logger.debug(
-					{ mint: poolState.baseMint.toString() },
-					`Skipping buy because one token at a time is turned on and token is already being processed`,
-				);
-				return;
+			if (this.config.useSnipeList && !this.snipeListCache?.isInList(poolState.baseMint.toString())) {
+				logger.debug({ mint: poolState.baseMint.toString() }, `Skipping buy because token is not in a snipe list`);
+				return false;
 			}
 
-			await this.mutex.acquire();
-		}
-
-		try {
-			const [market, mintAta] = await Promise.all([
-				this.marketStorage.get(poolState.marketId.toString()),
-				getAssociatedTokenAddress(poolState.baseMint, this.config.wallet.publicKey),
-			]);
+			const market = await this.marketStorage.get(poolState.marketId.toString());
 			const poolKeys: LiquidityPoolKeysV4 = createPoolKeys(accountId, poolState, market);
 
-			if (!this.config.useSnipeList) {
-				const match = await this.filterMatch(poolKeys);
-
-				if (!match) {
-					logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters`);
-					return;
-				}
+			let approved = false;
+			if (this.config.autoBuyDelay > 0) {
+				logger.debug({ mint: poolState.baseMint }, `Waiting for at least ${this.config.autoBuyDelay} ms before buy`);
+				[ approved ] = await Promise.all([this.approveToken(poolKeys), sleep(this.config.autoBuyDelay)]);
+			} else {
+				approved = await this.approveToken(poolKeys);
 			}
 
-			for (let i = 0; i < this.config.maxBuyRetries; i++) {
-				try {
-					logger.info(
-						{ mint: poolState.baseMint.toString() },
-						`Send buy transaction attempt: ${i + 1}/${this.config.maxBuyRetries}`,
-					);
-					const tokenOut = new Token(TOKEN_PROGRAM_ID, poolKeys.baseMint, poolKeys.baseDecimals);
-					const result = await this.swap(
-						poolKeys,
-						this.config.quoteAta,
-						mintAta,
-						this.config.quoteToken,
-						tokenOut,
-						this.config.quoteAmount,
-						this.config.buySlippage,
-						this.config.wallet,
-						'buy',
-					);
-
-					if (result.confirmed) {
-						logger.info(
-							{
-								mint: poolState.baseMint.toString(),
-								signature: result.signature,
-								url: `https://solscan.io/tx/${result.signature}?cluster=${NETWORK}`,
-							},
-							`Confirmed buy tx`,
-						);
-
-						break;
-					}
-
-					logger.info(
-						{
-							mint: poolState.baseMint.toString(),
-							signature: result.signature,
-							error: result.error,
-						},
-						`Error confirming buy tx`,
-					);
-				} catch (error) {
-					logger.debug({ mint: poolState.baseMint.toString(), error }, `Error confirming buy transaction`);
-				}
+			if (!approved) {
+				return false;
 			}
+
+			if (this.config.oneTokenAtATime) {
+				await this.buyMutex.acquire();
+				await this.sellMutex.waitForUnlock();
+			}
+
+			await this.buy(accountId, poolState.baseMint, poolKeys);
 		} catch (error) {
-			logger.error({ mint: poolState.baseMint.toString(), error }, `Failed to buy token`);
+			logger.error({ mint: poolState.baseMint.toString(), error }, `Error while investigating pool.`);
 		} finally {
 			if (this.config.oneTokenAtATime) {
-				this.mutex.release();
+				this.buyMutex.release(); //TODO: check if releasing if not locked is ok, docs say release callback returned when doing acquire is idempotent
+			}
+			return true;
+		}
+	}
+
+	public async buy(accountId: PublicKey, baseMint: PublicKey, poolKeys: LiquidityPoolKeysV4): Promise<boolean> {
+		const mintAta = await getAssociatedTokenAddress(poolKeys.baseMint, this.config.wallet.publicKey);
+
+		for (let i = 0; i < this.config.maxBuyRetries; i++) {
+			try {
+				logger.info(
+					{ mint: baseMint.toString() },
+					`Send buy transaction attempt: ${i + 1}/${this.config.maxBuyRetries}`,
+				);
+				const tokenOut = new Token(TOKEN_PROGRAM_ID, poolKeys.baseMint, poolKeys.baseDecimals);
+				const result = await this.swap(
+					poolKeys,
+					this.config.quoteAta,
+					mintAta,
+					this.config.quoteToken,
+					tokenOut,
+					this.config.quoteAmount,
+					this.config.buySlippage,
+					this.config.wallet,
+					'buy',
+				);
+
+				if (result.confirmed) {
+					logger.info(
+						{
+							mint: baseMint.toString(),
+							signature: result.signature,
+							url: `https://solscan.io/tx/${result.signature}?cluster=${NETWORK}`,
+						},
+							`Confirmed buy tx`,
+					);
+
+					return true;
+				}
+
+				logger.info(
+					{
+						mint: baseMint.toString(),
+						signature: result.signature,
+						error: result.error,
+					},
+					`Error confirming buy tx`,
+				);
+			} catch (error) {
+				logger.debug({ mint: baseMint.toString(), error }, `Error confirming buy transaction`);
 			}
 		}
+		return false;
 	}
 
 	public async sell(accountId: PublicKey, rawAccount: RawAccount) {
 		if (this.config.oneTokenAtATime) {
-			this.sellExecutionCount++;
+			await this.sellMutex.acquire();
 		}
 
 		try {
@@ -276,7 +286,7 @@ export class Bot {
 			logger.error({ mint: rawAccount.mint.toString(), error }, `Failed to sell token`);
 		} finally {
 			if (this.config.oneTokenAtATime) {
-				this.sellExecutionCount--;
+				await this.sellMutex.release();
 			}
 		}
 	}

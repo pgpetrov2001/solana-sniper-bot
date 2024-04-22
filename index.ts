@@ -221,7 +221,7 @@ const runListener = async () => {
 
 		if (!exists && poolOpenTime > runTimestamp) {
 			poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
-			await bot.buy(updatedAccountInfo.accountId, poolState);
+			await bot.proposeBuy(updatedAccountInfo.accountId, poolState);
 		}
 	});
 
