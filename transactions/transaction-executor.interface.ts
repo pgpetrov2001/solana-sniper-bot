@@ -1,4 +1,4 @@
-import { BlockhashWithExpiryBlockHeight, Keypair, MessageV0, Signer, VersionedTransaction } from '@solana/web3.js';
+import { BlockhashWithExpiryBlockHeight, Keypair, VersionedTransaction } from '@solana/web3.js';
 
 export interface TransactionExecutor {
   executeAndConfirm(
@@ -6,5 +6,5 @@ export interface TransactionExecutor {
     payer: Keypair,
     latestBlockHash: BlockhashWithExpiryBlockHeight,
     skipPreflight: boolean,
-  ): Promise<{ confirmed: boolean; signature?: string }>;
+  ): Promise<{ confirmed: boolean; signature?: string, error?: string }>;
 }
