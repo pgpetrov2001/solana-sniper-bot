@@ -74,14 +74,21 @@ export class PoolSizeFilter implements Filter {
 			},
 			this.connection.commitment,
 		);
-		logger.trace({ mint: poolKeys.baseMint }, `Listening for changes of balance of the LP ${this.quoteToken} vault with address ${poolKeys.quoteVault}`);
+		logger.trace(
+			{ mint: poolKeys.baseMint },
+			`Listening for changes of balance of the LP ${this.quoteToken} vault with address ${poolKeys.quoteVault}`,
+		);
 	}
 
 	async stop() {
 		const subscription = this.subscription!;
 		this.subscription = null;
 		await this.connection.removeAccountChangeListener(subscription);
-		this.retrieveDeferred.reject(new Error(`Attempted to retrieve update on filter but listener for pool size filter for token with mint ${this.poolKeys!.baseMint} has been stopped`));
+		this.retrieveDeferred.reject(
+			new Error(
+				`Attempted to retrieve update on filter but listener for pool size filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
+			),
+		);
 		this.poolKeys = null;
 	}
 

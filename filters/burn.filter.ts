@@ -56,14 +56,21 @@ export class BurnFilter implements Filter {
 			},
 			this.connection.commitment,
 		);
-		logger.trace({ mint: poolKeys.baseMint }, `Listening for changes of supply of LP token with mint ${poolKeys.lpMint}`);
+		logger.trace(
+			{ mint: poolKeys.baseMint },
+			`Listening for changes of supply of LP token with mint ${poolKeys.lpMint}`,
+		);
 	}
 
 	async stop() {
 		const subscription = this.subscription!;
 		this.subscription = null;
 		await this.connection.removeAccountChangeListener(subscription);
-		this.retrieveDeferred.reject(new Error(`Attempted to retrieve update on filter but listener for burn filter for token with mint ${this.poolKeys!.baseMint} has been stopped`));
+		this.retrieveDeferred.reject(
+			new Error(
+				`Attempted to retrieve update on filter but listener for burn filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
+			),
+		);
 		this.poolKeys = null;
 	}
 

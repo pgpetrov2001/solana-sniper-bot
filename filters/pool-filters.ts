@@ -15,67 +15,67 @@ export interface Filter {
 }
 
 export interface FilterResult {
-  ok: boolean;
-  message?: string;
+	ok: boolean;
+	message?: string;
 }
 
 export interface PoolFilterArgs {
-  minPoolSize: TokenAmount;
-  maxPoolSize: TokenAmount;
-  quoteToken: Token;
+	minPoolSize: TokenAmount;
+	maxPoolSize: TokenAmount;
+	quoteToken: Token;
 }
 
 export class PoolFilters {
 	private filters: Filter[] = [];
 	private poolKeys: LiquidityPoolKeysV4 | null = null;
 
-  constructor(
-    readonly connection: Connection,
-    readonly args: PoolFilterArgs,
-  ) {
-    if (CHECK_IF_BURNED) {
-      this.filters.push(new BurnFilter(connection));
-    }
+	constructor(
+		readonly connection: Connection,
+		readonly args: PoolFilterArgs,
+	) {
+		if (CHECK_IF_BURNED) {
+			this.filters.push(new BurnFilter(connection));
+		}
 
-    if (CHECK_IF_MINT_IS_RENOUNCED || CHECK_IF_FREEZABLE) {
-      this.filters.push(new RenouncedFreezeFilter(connection, CHECK_IF_MINT_IS_RENOUNCED, CHECK_IF_FREEZABLE));
-    }
+		if (CHECK_IF_MINT_IS_RENOUNCED || CHECK_IF_FREEZABLE) {
+			this.filters.push(new RenouncedFreezeFilter(connection, CHECK_IF_MINT_IS_RENOUNCED, CHECK_IF_FREEZABLE));
+		}
 
-    if (CHECK_IF_MUTABLE) {
-      this.filters.push(new MutableFilter(connection, getMetadataAccountDataSerializer()));
-    }
+		if (CHECK_IF_MUTABLE) {
+			this.filters.push(new MutableFilter(connection, getMetadataAccountDataSerializer()));
+		}
 
-    if (!args.minPoolSize.isZero() || !args.maxPoolSize.isZero()) {
-      this.filters.push(new PoolSizeFilter(connection, args.quoteToken, args.minPoolSize, args.maxPoolSize));
-    }
-  }
+		if (!args.minPoolSize.isZero() || !args.maxPoolSize.isZero()) {
+			this.filters.push(new PoolSizeFilter(connection, args.quoteToken, args.minPoolSize, args.maxPoolSize));
+		}
+	}
 
-  public async execute(poolKeys: LiquidityPoolKeysV4): Promise<boolean> {
-    if (this.filters.length === 0) {
-      return true;
-    }
+	public async execute(poolKeys: LiquidityPoolKeysV4): Promise<boolean> {
+		if (this.filters.length === 0) {
+			return true;
+		}
 
-    const result = await Promise.all(this.filters.map((f) => f.execute(poolKeys)));
-    const passed = result.map((r) => r.ok);
-    this.filters = this.filters.filter((f, i) => {
-      if (f instanceof RenouncedFilter) {
-        return !passed[i];
-      }
-      return true;
-    });
-    const pass = passed.every((p) => p);
+		const result = await Promise.all(this.filters.map((f) => f.execute(poolKeys)));
+		const passed = result.map((r) => r.ok);
+		this.filters = this.filters.filter((f, i) => {
+			if (f instanceof RenouncedFilter) {
+				return !passed[i];
+			}
+			return true;
+		});
+		const pass = passed.every((p) => p);
 
-    if (pass) {
-      return true;
-    }
+		if (pass) {
+			return true;
+		}
 
-    for (const filterResult of result.filter((r) => !r.ok)) {
-      logger.trace(filterResult.message);
-    }
-    logger.trace(`Filters remaining: ${this.filters.length}`);
+		for (const filterResult of result.filter((r) => !r.ok)) {
+			logger.trace(filterResult.message);
+		}
+		logger.trace(`Filters remaining: ${this.filters.length}`);
 
-    return false;
-  }
+		return false;
+	}
 
 	async retrieve(): Promise<boolean> {
 		const result = await Promise.all(this.filters.map(({ retrieve }) => retrieve()));

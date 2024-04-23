@@ -4,7 +4,7 @@ export class Deferred {
 	reject: Function = () => {};
 	resolve: Function = () => {};
 	public promise = new Promise((resolve, reject) => {
-		this.reject = reject
-		this.resolve = resolve
+		this.reject = reject;
+		this.resolve = resolve;
 	});
 }

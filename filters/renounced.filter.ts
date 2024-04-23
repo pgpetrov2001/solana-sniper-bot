@@ -15,7 +15,7 @@ export class RenouncedFreezeFilter implements Filter {
 		private readonly checkRenounced: boolean,
 		private readonly checkFreezable: boolean,
 	) {
-		this.messageKeywords = [...(this.checkRenounced? ['mint']: []), ...(this.checkFreezable? ['freeze']: [])];
+		this.messageKeywords = [...(this.checkRenounced ? ['mint'] : []), ...(this.checkFreezable ? ['freeze'] : [])];
 	}
 
 	private resolve(mintData: RawMint): FilterResult {
@@ -23,7 +23,7 @@ export class RenouncedFreezeFilter implements Filter {
 		const freezable = !this.checkFreezable || mintData.freezeAuthorityOption !== 0;
 		const ok = renounced && !freezable;
 
-		const message = [...(renounced? ['mint']: []), ...(!freezable? ['freeze']: [])];
+		const message = [...(renounced ? ['mint'] : []), ...(!freezable ? ['freeze'] : [])];
 
 		return { ok: ok, message: ok ? undefined : `RenouncedFreeze -> Creator can ${message.join(' and ')} tokens` };
 	}
@@ -74,14 +74,21 @@ export class RenouncedFreezeFilter implements Filter {
 			},
 			this.connection.commitment,
 		);
-		logger.trace({ mint: poolKeys.baseMint }, `Listening for changes of ${this.messageKeywords.join(' and ')} of token.`);
+		logger.trace(
+			{ mint: poolKeys.baseMint },
+			`Listening for changes of ${this.messageKeywords.join(' and ')} of token.`,
+		);
 	}
 
 	async stop() {
 		const subscription = this.subscription!;
 		this.subscription = null;
 		await this.connection.removeAccountChangeListener(subscription);
-		this.retrieveDeferred.reject(new Error(`Attempted to retrieve update on filter but listener for renounced filter for token with mint ${this.poolKeys!.baseMint} has been stopped`));
+		this.retrieveDeferred.reject(
+			new Error(
+				`Attempted to retrieve update on filter but listener for renounced filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
+			),
+		);
 		this.poolKeys = null;
 	}
 
