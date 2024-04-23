@@ -22,6 +22,7 @@ import { createPoolKeys, logger, NETWORK, sleep } from './helpers';
 import { Mutex } from 'async-mutex';
 import BN from 'bn.js';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
+import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
 
 export interface BotConfig {
   wallet: Keypair;
@@ -65,6 +66,7 @@ export class Bot {
   private readonly mutex: Mutex;
   private sellExecutionCount = 0;
   public readonly isWarp: boolean = false;
+  public readonly isJito: boolean = false;
 
   constructor(
     private readonly connection: Connection,
@@ -74,6 +76,7 @@ export class Bot {
     readonly config: BotConfig,
   ) {
     this.isWarp = txExecutor instanceof WarpTransactionExecutor;
+    this.isJito = txExecutor instanceof JitoTransactionExecutor;
 
     this.mutex = new Mutex();
     this.poolFilters = new PoolFilters(connection, {
@@ -326,7 +329,7 @@ export class Bot {
       payerKey: wallet.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
       instructions: [
-        ...(this.isWarp
+        ...(this.isWarp || this.isJito
           ? []
           : [
               ComputeBudgetProgram.setComputeUnitPrice({ microLamports: this.config.unitPrice }),
