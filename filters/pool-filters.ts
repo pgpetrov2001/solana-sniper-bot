@@ -8,7 +8,10 @@ import { PoolSizeFilter } from './pool-size.filter';
 import { CHECK_IF_BURNED, CHECK_IF_FREEZABLE, CHECK_IF_MINT_IS_RENOUNCED, CHECK_IF_MUTABLE, logger } from '../helpers';
 
 export interface Filter {
-  execute(poolKeysV4: LiquidityPoolKeysV4): Promise<FilterResult>;
+	execute(poolKeysV4: LiquidityPoolKeysV4): Promise<FilterResult>;
+	listen(poolKeys: LiquidityPoolKeysV4): void;
+	stop(): Promise<void>;
+	retrieve(): Promise<FilterResult>;
 }
 
 export interface FilterResult {
@@ -23,7 +26,8 @@ export interface PoolFilterArgs {
 }
 
 export class PoolFilters {
-  private filters: Filter[] = [];
+	private filters: Filter[] = [];
+	private poolKeys: LiquidityPoolKeysV4 | null = null;
 
   constructor(
     readonly connection: Connection,
@@ -72,4 +76,31 @@ export class PoolFilters {
 
     return false;
   }
+
+	async retrieve(): Promise<boolean> {
+		const result = await Promise.all(this.filters.map(({ retrieve }) => retrieve()));
+		const passed = result.map(({ ok }) => ok);
+		this.filters = this.filters.filter((f, i) => !passed[i]);
+		const pass = passed.every((p) => p);
+		//TODO: show message for filters that passed even if not all filters got an update
+		for (const filterResult of result.filter(({ ok }) => !ok)) {
+			logger.trace({ mint: this.poolKeys!.baseMint }, filterResult.message);
+		}
+		logger.trace(`Filters remaining: ${this.filters.length}`);
+		return pass;
+	}
+
+	public listen(poolKeys: LiquidityPoolKeysV4) {
+		this.poolKeys = poolKeys;
+		for (const filter of this.filters) {
+			filter.listen(poolKeys);
+		}
+	}
+
+	public async stop() {
+		for (const filter of this.filters) {
+			await filter.stop();
+		}
+		this.poolKeys = null;
+	}
 }
