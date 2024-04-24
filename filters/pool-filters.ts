@@ -66,14 +66,14 @@ export class PoolFilters {
 		}
 
 		for (const filterResult of result) {
-			logger.trace(filterResult.message);
+			logger.trace({ mint: poolKeys.baseMint }, filterResult.message);
 		}
 		logger.trace(`Filters remaining: ${this.filters.length}`);
 
 		return false;
 	}
 
-	async retrieve(): Promise<boolean> {
+	async retrieve(): Promise<{ pass: boolean, continueListening: boolean }> {
 		let retire = false;
 		const { result, index } = await Promise.any(
 			this.filters.map(async (f, i) => {
@@ -85,7 +85,7 @@ export class PoolFilters {
 			}),
 		);
 		if (retire) {
-			return false;
+			return { pass: false, continueListening: false };
 		}
 		if (result.ok) {
 			this.filters.splice(index, 1);
@@ -93,7 +93,7 @@ export class PoolFilters {
 		logger.trace({ mint: this.poolKeys!.baseMint }, result.message);
 		const pass = this.filters.length === 0;
 		logger.trace(`Filters remaining: ${this.filters.length}`);
-		return !pass;
+		return { pass, continueListening: !pass };
 	}
 
 	public listen(poolKeys: LiquidityPoolKeysV4) {

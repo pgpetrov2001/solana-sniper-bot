@@ -370,10 +370,13 @@ export class Bot {
 			try {
 				this.poolFilters.listen(poolKeys);
 
-				let continueListening;
-				while ((continueListening = await this.poolFilters.retrieve())); //TODO: return Deferred object that will receive notification for adverse change in rug indicators, or receive a callback and schedule to call it under the same conditions
+				let continueListening, pass;
+				do {
+					({ pass, continueListening } = await this.poolFilters.retrieve());
+					//TODO: return Deferred object that will receive notification for adverse change in rug indicators, or receive a callback and schedule to call it under the same conditions
+				} while (continueListening);
 
-				return true;
+				return pass;
 			} catch (error) {
 				logger.error(
 					{ mint: poolKeys.baseMint.toString(), error },
@@ -384,7 +387,7 @@ export class Bot {
 				await this.poolFilters.stop();
 			}
 		}
-		logger.debug({ mint: poolKeys.baseMint }, `Pool passed all filters from first try.`);
+		logger.trace({ mint: poolKeys.baseMint }, `Pool passed all filters from first try.`);
 		return true;
 	}
 
