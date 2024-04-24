@@ -137,7 +137,14 @@ export class Bot {
 			const poolKeys: LiquidityPoolKeysV4 = createPoolKeys(accountId, poolState, market);
 
 			if (!this.config.useSnipeList) {
-				const match = await this.filterMatch(poolKeys);
+				const match = await Promise.any([
+					this.filterMatch(poolKeys),
+					(async () => {
+						await sleep(this.config.filterCheckDuration);
+						await this.poolFilters.stop();
+						return false;
+					})(),
+				]);
 
 				if (!match) {
 					logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters`);
@@ -358,39 +365,27 @@ export class Bot {
 	}
 
 	private async filterMatch(poolKeys: LiquidityPoolKeysV4) {
-		if (this.config.filterCheckInterval === 0 || this.config.filterCheckDuration === 0) {
-			return true;
-		}
-
-		const timesToCheck = this.config.filterCheckDuration / this.config.filterCheckInterval;
-		let timesChecked = 0;
-		let matchCount = 0;
-
-		do {
+		const shouldBuy = await this.poolFilters.execute(poolKeys);
+		if (!shouldBuy) {
 			try {
-				const shouldBuy = await this.poolFilters.execute(poolKeys);
+				this.poolFilters.listen(poolKeys);
 
-				if (shouldBuy) {
-					matchCount++;
+				let continueListening;
+				while ((continueListening = await this.poolFilters.retrieve())); //TODO: return Deferred object that will receive notification for adverse change in rug indicators, or receive a callback and schedule to call it under the same conditions
 
-					if (this.config.consecutiveMatchCount <= matchCount) {
-						logger.debug(
-							{ mint: poolKeys.baseMint.toString() },
-							`Filter match ${matchCount}/${this.config.consecutiveMatchCount}`,
-						);
-						return true;
-					}
-				} else {
-					matchCount = 0;
-				}
-
-				await sleep(this.config.filterCheckInterval);
+				return true;
+			} catch (error) {
+				logger.error(
+					{ mint: poolKeys.baseMint.toString(), error },
+					`Failed to retrieve update on changed values, relevant to filters`,
+				);
+				return false;
 			} finally {
-				timesChecked++;
+				await this.poolFilters.stop();
 			}
-		} while (timesChecked < timesToCheck);
-
-		return false;
+		}
+		logger.debug({ mint: poolKeys.baseMint }, `Pool passed all filters from first try.`);
+		return true;
 	}
 
 	private async priceMatch(amountIn: TokenAmount, poolKeys: LiquidityPoolKeysV4) {

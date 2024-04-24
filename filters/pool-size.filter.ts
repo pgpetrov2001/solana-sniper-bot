@@ -36,17 +36,16 @@ export class PoolSizeFilter implements Filter {
 			}
 		}
 
-		return { ok: inRange };
+		return { ok: inRange, message: `PoolSize -> Pool size ${poolSize.toFixed()} is in allowed range` };
 	}
 
 	private reject(error: any, poolKeys: LiquidityPoolKeysV4): FilterResult {
 		logger.error({ mint: poolKeys.baseMint, error }, `Failed to check pool size`);
-		return { ok: false, message: 'PoolSize -> Failed to check pool size' };
+		return { ok: false, message: 'PoolSize -> Failed to check pool size', listenerStopped: error.listenerStopped };
 	}
 
 	async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
 		try {
-			//TODO: token account owned by token program change in amount field (= balance)
 			const response = await this.connection.getTokenAccountBalance(poolKeys.quoteVault, this.connection.commitment);
 			return this.resolve(response.value.amount);
 		} catch (error) {
@@ -55,12 +54,14 @@ export class PoolSizeFilter implements Filter {
 	}
 
 	async retrieve(): Promise<FilterResult> {
+		let quoteVaultData;
 		try {
-			const quoteVaultData = await this.recv();
-			return this.resolve(String(quoteVaultData.amount));
+			quoteVaultData = await this.recv();
 		} catch (e: any) {
+			e.listenerStopped = true;
 			return this.reject(e, this.poolKeys!);
 		}
+		return this.resolve(String(quoteVaultData.amount));
 	}
 
 	listen(poolKeys: LiquidityPoolKeysV4) {
@@ -76,20 +77,21 @@ export class PoolSizeFilter implements Filter {
 		);
 		logger.trace(
 			{ mint: poolKeys.baseMint },
-			`Listening for changes of balance of the LP ${this.quoteToken} vault with address ${poolKeys.quoteVault}`,
+			`Listening for changes of balance of the LP ${this.quoteToken.symbol} vault with address ${poolKeys.quoteVault}`,
 		);
 	}
 
 	async stop() {
-		const subscription = this.subscription!;
+		const subscription = this.subscription;
 		this.subscription = null;
-		await this.connection.removeAccountChangeListener(subscription);
+		if (subscription != null) {
+			await this.connection.removeAccountChangeListener(subscription);
+		}
 		this.retrieveDeferred.reject(
 			new Error(
 				`Attempted to retrieve update on filter but listener for pool size filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
 			),
 		);
-		this.poolKeys = null;
 	}
 
 	private async recv(): Promise<RawAccount> {

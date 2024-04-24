@@ -12,7 +12,10 @@ export class BurnFilter implements Filter {
 	constructor(private readonly connection: Connection) {}
 
 	private resolve(burned: boolean): FilterResult {
-		return { ok: burned, message: burned ? undefined : "Burned -> Creator didn't burn LP" };
+		return {
+			ok: burned,
+			message: burned ? 'Burned -> LP token for current supply has been burned' : "Burned -> Creator didn't burn LP",
+		};
 	}
 
 	private reject(error: any, poolKeys: LiquidityPoolKeysV4): FilterResult {
@@ -20,9 +23,7 @@ export class BurnFilter implements Filter {
 			return { ok: true };
 		}
 
-		logger.error({ mint: poolKeys.baseMint }, `Failed to check if LP is burned`);
-
-		return { ok: false, message: 'Failed to check if LP is burned' };
+		return { ok: false, message: 'Failed to check if LP is burned', listenerStopped: error.listenerStopped };
 	}
 
 	async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
@@ -36,13 +37,15 @@ export class BurnFilter implements Filter {
 	}
 
 	async retrieve(): Promise<FilterResult> {
+		let mintData;
 		try {
-			const mintData = await this.recv();
-			const burned = mintData.supply === BigInt(0);
-			return this.resolve(burned);
+			mintData = await this.recv();
 		} catch (e: any) {
+			e.listenerStopped = true;
 			return this.reject(e, this.poolKeys!);
 		}
+		const burned = mintData.supply === BigInt(0);
+		return this.resolve(burned);
 	}
 
 	listen(poolKeys: LiquidityPoolKeysV4) {
@@ -63,15 +66,16 @@ export class BurnFilter implements Filter {
 	}
 
 	async stop() {
-		const subscription = this.subscription!;
+		const subscription = this.subscription;
 		this.subscription = null;
-		await this.connection.removeAccountChangeListener(subscription);
+		if (subscription != null) {
+			await this.connection.removeAccountChangeListener(subscription);
+		}
 		this.retrieveDeferred.reject(
 			new Error(
 				`Attempted to retrieve update on filter but listener for burn filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
 			),
 		);
-		this.poolKeys = null;
 	}
 
 	private async recv(): Promise<RawMint> {

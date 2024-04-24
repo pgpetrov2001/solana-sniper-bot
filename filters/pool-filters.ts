@@ -17,6 +17,7 @@ export interface Filter {
 export interface FilterResult {
 	ok: boolean;
 	message?: string;
+	listenerStopped?: boolean;
 }
 
 export interface PoolFilterArgs {
@@ -57,19 +58,14 @@ export class PoolFilters {
 
 		const result = await Promise.all(this.filters.map((f) => f.execute(poolKeys)));
 		const passed = result.map((r) => r.ok);
-		this.filters = this.filters.filter((f, i) => {
-			if (f instanceof RenouncedFilter) {
-				return !passed[i];
-			}
-			return true;
-		});
+		this.filters = this.filters.filter((f, i) => !passed[i]);
 		const pass = passed.every((p) => p);
 
 		if (pass) {
 			return true;
 		}
 
-		for (const filterResult of result.filter((r) => !r.ok)) {
+		for (const filterResult of result) {
 			logger.trace(filterResult.message);
 		}
 		logger.trace(`Filters remaining: ${this.filters.length}`);
@@ -78,16 +74,26 @@ export class PoolFilters {
 	}
 
 	async retrieve(): Promise<boolean> {
-		const result = await Promise.all(this.filters.map(({ retrieve }) => retrieve()));
-		const passed = result.map(({ ok }) => ok);
-		this.filters = this.filters.filter((f, i) => !passed[i]);
-		const pass = passed.every((p) => p);
-		//TODO: show message for filters that passed even if not all filters got an update
-		for (const filterResult of result.filter(({ ok }) => !ok)) {
-			logger.trace({ mint: this.poolKeys!.baseMint }, filterResult.message);
+		let retire = false;
+		const { result, index } = await Promise.any(
+			this.filters.map(async (f, i) => {
+				const filterResult = await f.retrieve();
+				if (filterResult.listenerStopped) {
+					retire = true;
+				}
+				return { result: filterResult, index: i };
+			}),
+		);
+		if (retire) {
+			return false;
 		}
+		if (result.ok) {
+			this.filters.splice(index, 1);
+		}
+		logger.trace({ mint: this.poolKeys!.baseMint }, result.message);
+		const pass = this.filters.length === 0;
 		logger.trace(`Filters remaining: ${this.filters.length}`);
-		return pass;
+		return !pass;
 	}
 
 	public listen(poolKeys: LiquidityPoolKeysV4) {

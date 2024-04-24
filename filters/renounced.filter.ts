@@ -25,18 +25,19 @@ export class RenouncedFreezeFilter implements Filter {
 
 		const message = [...(renounced ? ['mint'] : []), ...(!freezable ? ['freeze'] : [])];
 
-		return { ok: ok, message: ok ? undefined : `RenouncedFreeze -> Creator can ${message.join(' and ')} tokens` };
+		return {
+			ok: ok,
+			message: ok
+				? `RenouncedFreeze -> Creator can no longer ${this.messageKeywords.join(' or ')} tokens`
+				: `RenouncedFreeze -> Creator can ${message.join(' and ')} tokens`,
+		};
 	}
 
 	private reject(error: any, poolKeys: LiquidityPoolKeysV4): FilterResult {
-		logger.error(
-			{ mint: poolKeys.baseMint },
-			`RenouncedFreeze -> Failed to check if creator can ${this.messageKeywords.join(' and ')} tokens`,
-		);
-
 		return {
 			ok: false,
 			message: `RenouncedFreeze -> Failed to check if creator can ${this.messageKeywords.join(' and ')} tokens`,
+			listenerStopped: error.listenerStopped,
 		};
 	}
 
@@ -55,12 +56,14 @@ export class RenouncedFreezeFilter implements Filter {
 	}
 
 	async retrieve(): Promise<FilterResult> {
+		let mintData;
 		try {
-			const mintData = await this.recv();
-			return this.resolve(mintData);
+			mintData = await this.recv();
 		} catch (e: any) {
+			e.listenerStopped = true;
 			return this.reject(e, this.poolKeys!);
 		}
+		return this.resolve(mintData);
 	}
 
 	listen(poolKeys: LiquidityPoolKeysV4) {
@@ -81,15 +84,16 @@ export class RenouncedFreezeFilter implements Filter {
 	}
 
 	async stop() {
-		const subscription = this.subscription!;
+		const subscription = this.subscription;
 		this.subscription = null;
-		await this.connection.removeAccountChangeListener(subscription);
+		if (subscription != null) {
+			await this.connection.removeAccountChangeListener(subscription);
+		}
 		this.retrieveDeferred.reject(
 			new Error(
 				`Attempted to retrieve update on filter but listener for renounced filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
 			),
 		);
-		this.poolKeys = null;
 	}
 
 	private async recv(): Promise<RawMint> {

@@ -8,13 +8,33 @@ import {
 	MetadataAccountDataArgs,
 } from '@metaplex-foundation/mpl-token-metadata';
 import { Serializer } from '@metaplex-foundation/umi/serializers';
-import { logger } from '../helpers';
+import { logger, Deferred } from '../helpers';
 
 export class MutableFilter implements Filter {
+	private poolKeys: LiquidityPoolKeysV4 | null = null;
+	private retrieveDeferred = new Deferred();
+	private subscription: number | null = null;
+
 	constructor(
 		private readonly connection: Connection,
 		private readonly metadataSerializer: Serializer<MetadataAccountDataArgs, MetadataAccountData>,
 	) {}
+
+	private resolve(metadataAccountData: MetadataAccountData): FilterResult {
+		const mutable = metadataAccountData.isMutable;
+		return {
+			ok: !mutable,
+			message: !mutable ? 'Mutable -> Creator can no longer change metadata' : 'Mutable -> Creator can change metadata',
+		};
+	}
+
+	private reject(error: any, poolKeys: LiquidityPoolKeysV4): FilterResult {
+		return {
+			ok: false,
+			message: 'Mutable -> Failed to check if metadata are mutable',
+			listenerStopped: error.listenerStopped,
+		};
+	}
 
 	async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
 		try {
@@ -23,14 +43,55 @@ export class MutableFilter implements Filter {
 			if (!metadataAccount?.data) {
 				return { ok: false, message: 'Mutable -> Failed to fetch account data' };
 			}
-			const deserialize = this.metadataSerializer.deserialize(metadataAccount.data);
-			const mutable = deserialize[0].isMutable;
-
-			return { ok: !mutable, message: !mutable ? undefined : 'Mutable -> Creator can change metadata' };
+			const [metadataAccountData] = this.metadataSerializer.deserialize(metadataAccount.data);
+			return this.resolve(metadataAccountData);
 		} catch (e: any) {
-			logger.error({ mint: poolKeys.baseMint }, `Mutable -> Failed to check if metadata are mutable`);
+			return this.reject(e, poolKeys);
 		}
+	}
 
-		return { ok: false, message: 'Mutable -> Failed to check if metadata are mutable' };
+	async retrieve(): Promise<FilterResult> {
+		let metadataAccountData;
+		try {
+			metadataAccountData = await this.recv();
+		} catch (e: any) {
+			e.listenerStopped = true;
+			return this.reject(e, this.poolKeys!);
+		}
+		return this.resolve(metadataAccountData);
+	}
+
+	listen(poolKeys: LiquidityPoolKeysV4) {
+		const { publicKey: metadataPK } = getPdaMetadataKey(poolKeys.baseMint);
+		this.poolKeys = poolKeys;
+		this.retrieveDeferred = new Deferred();
+		this.subscription = this.connection.onAccountChange(
+			metadataPK,
+			async (updatedAccountInfo) => {
+				const [metadataAccountData] = this.metadataSerializer.deserialize(updatedAccountInfo.data);
+				this.retrieveDeferred.resolve(metadataAccountData);
+			},
+			this.connection.commitment,
+		);
+		logger.trace({ mint: poolKeys.baseMint }, `Listening for changes of metadata mutability.`);
+	}
+
+	async stop() {
+		const subscription = this.subscription;
+		this.subscription = null;
+		if (subscription != null) {
+			await this.connection.removeAccountChangeListener(subscription);
+		}
+		this.retrieveDeferred.reject(
+			new Error(
+				`Attempted to retrieve update on filter but listener for mutable metadata filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
+			),
+		);
+	}
+
+	private async recv(): Promise<MetadataAccountData> {
+		const ret = (await this.retrieveDeferred.promise) as MetadataAccountData;
+		this.retrieveDeferred = new Deferred();
+		return ret;
 	}
 }
