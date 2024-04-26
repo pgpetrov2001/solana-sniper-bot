@@ -73,7 +73,7 @@ export class PoolFilters {
 		return false;
 	}
 
-	async retrieve(): Promise<{ pass: boolean, continueListening: boolean }> {
+	async retrieve(): Promise<{ pass: boolean; continueListening: boolean }> {
 		let retire = false;
 		const { result, index } = await Promise.any(
 			this.filters.map(async (f, i) => {
