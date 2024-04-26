@@ -51,6 +51,7 @@ import {
 import { version } from './package.json';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
+import { TPUTransactionExecutor } from './transactions/tpu-transaction-executor';
 
 const connection = new Connection(RPC_ENDPOINT, {
 	wsEndpoint: RPC_WEBSOCKET_ENDPOINT,
@@ -154,6 +155,10 @@ const runListener = async () => {
 		}
 		case 'jito': {
 			txExecutor = new JitoTransactionExecutor(CUSTOM_FEE, connection);
+			break;
+		}
+		case 'tpu': {
+			txExecutor = new TPUTransactionExecutor(connection);
 			break;
 		}
 		default: {
