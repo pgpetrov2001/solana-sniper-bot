@@ -6,7 +6,7 @@ import {
 	Transaction,
 	VersionedTransaction,
 } from '@solana/web3.js';
-import { TpuConnection } from 'tpu-client';
+import { TpuConnection } from '../tpu-client';
 import { TransactionExecutor } from './transaction-executor.interface';
 import { logger } from '../helpers';
 

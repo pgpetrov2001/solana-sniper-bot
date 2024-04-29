@@ -15,12 +15,12 @@ import dgram from 'dgram';
 import bs58 from 'bs58';
 
 export class LeaderTpuCache {
-	leaderTpuMap: Map<string, string>;
+	leaderTpuMap!: Map<string, string | null>;
 	connection: Connection;
 	first_slot: number;
-	slots_in_epoch: number;
-	last_epoch_info_slot: number;
-	leaders: Array<PublicKey>;
+	slots_in_epoch!: number;
+	last_epoch_info_slot!: number;
+	leaders!: Array<PublicKey>;
 	private constructor(connection: Connection, startSlot: number) {
 		this.connection = connection;
 		this.first_slot = startSlot;
@@ -40,9 +40,9 @@ export class LeaderTpuCache {
 			});
 		});
 	}
-	fetchClusterTpuSockets(): Promise<Map<string, string>> {
+	fetchClusterTpuSockets(): Promise<Map<string, string | null>> {
 		return new Promise((resolve, reject) => {
-			const map = new Map<string, string>();
+			const map = new Map<string, string | null>();
 			this.connection
 				.getClusterNodes()
 				.then((contactInfo) => {
@@ -150,7 +150,7 @@ export interface TpuClientConfig {
 export class TpuClient {
 	sendSocket: dgram.Socket;
 	fanoutSlots: number;
-	leaderTpuService: LeaderTpuService;
+	leaderTpuService!: LeaderTpuService;
 	exit: boolean;
 	connection: Connection;
 
@@ -248,7 +248,7 @@ export class TpuClient {
 								let signature: Uint8Array | Buffer;
 								try {
 									const transaction = Transaction.from(rawTransaction);
-									signature = transaction.signature;
+									signature = transaction.signature!;
 								} catch (e: any) {
 									const transaction = VersionedTransaction.deserialize(new Uint8Array(rawTransaction));
 									[signature] = transaction.signatures;
@@ -269,9 +269,9 @@ export class TpuClient {
 }
 
 export class LeaderTpuService {
-	recentSlots: RecentLeaderSlots;
-	leaderTpuCache: LeaderTpuCache;
-	subscription: number | null;
+	recentSlots!: RecentLeaderSlots;
+	leaderTpuCache!: LeaderTpuCache;
+	subscription: number | null = null;
 	connection: Connection;
 
 	//@ts-check
@@ -304,8 +304,6 @@ export class LeaderTpuService {
 							}
 							leaderTpuService.recentSlots.recordSlot(slotUpdate.slot);
 						});
-					} else {
-						leaderTpuService.subscription = null;
 					}
 					leaderTpuService.run();
 					resolve(leaderTpuService);
@@ -371,7 +369,7 @@ export class LeaderTpuService {
 }
 
 export class TpuConnection extends Connection {
-	tpuClient: TpuClient;
+	tpuClient!: TpuClient;
 
 	//@ts-check
 	/**
@@ -425,7 +423,7 @@ export class TpuConnection extends Connection {
 		options?: ConfirmOptions,
 	): Promise<TransactionSignature> {
 		const signature = await this.sendTransaction(transaction, signers);
-		const status = (await connection.confirmTransaction(signature, options.commitment)).value;
+		const status = (await connection.confirmTransaction(signature, options?.commitment ?? 'confirmed')).value;
 		if (status.err) {
 			throw new Error(`Transaction ${signature} failed (${JSON.stringify(status)})`);
 		}
@@ -446,7 +444,7 @@ export class TpuConnection extends Connection {
 		options?: ConfirmOptions,
 	): Promise<string> {
 		const signature = await this.sendRawTransaction(rawTransaction);
-		const status = (await connection.confirmTransaction(signature, options.commitment)).value;
+		const status = (await connection.confirmTransaction(signature, options?.commitment ?? 'confirmed')).value;
 		if (status.err) {
 			throw new Error(`Transaction ${signature} failed (${JSON.stringify(status)})`);
 		}
