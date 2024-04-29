@@ -7,6 +7,8 @@ import {
 	Signer,
 	Transaction,
 	TransactionSignature,
+	SendOptions,
+	VersionedTransaction,
 } from '@solana/web3.js';
 import { default as Denque } from 'denque';
 import dgram from 'dgram';
@@ -195,7 +197,26 @@ export class TpuClient {
 	 * @param signers {Array<Signer>}
 	 * @returns {Promise<string>}
 	 */
-	async sendTransaction(transaction: Transaction, signers: Array<Signer>): Promise<string> {
+	async sendTransaction(
+		transaction: VersionedTransaction | Transaction,
+		signersOrOptions?: Array<Signer> | SendOptions,
+		options?: SendOptions,
+	): Promise<TransactionSignature> {
+		if ('version' in transaction) {
+			if (signersOrOptions && Array.isArray(signersOrOptions)) {
+				throw new Error('Invalid arguments');
+			}
+
+			const wireTransaction = transaction.serialize();
+			return await this.sendRawTransaction(wireTransaction);
+		}
+
+		if (signersOrOptions === undefined || !Array.isArray(signersOrOptions)) {
+			throw new Error('Invalid arguments');
+		}
+
+		const signers = signersOrOptions;
+
 		if (transaction.nonceInfo) {
 			transaction.sign(...signers);
 		} else {
@@ -216,14 +237,25 @@ export class TpuClient {
 		return new Promise((resolve, reject) => {
 			this.leaderTpuService.leaderTpuSockets(this.fanoutSlots).then((tpu_addresses) => {
 				tpu_addresses.forEach((tpu_address) => {
+					console.log(`sending to tpu address ${tpu_address}`);
 					this.sendSocket.send(
 						rawTransaction,
 						parseInt(tpu_address.split(':')[1]),
 						tpu_address.split(':')[0],
 						(error) => {
 							if (!error) {
-								const message = Transaction.from(rawTransaction);
-								resolve(bs58.encode(message.signature));
+								//const version = VersionedMessage.deserializeMessageVersion(rawTransaction);
+								let signature: Uint8Array | Buffer;
+								try {
+									const transaction = Transaction.from(rawTransaction);
+									signature = transaction.signature;
+								} catch (e: any) {
+									const transaction = VersionedTransaction.deserialize(new Uint8Array(rawTransaction));
+									[signature] = transaction.signatures;
+								}
+								resolve(bs58.encode(signature));
+								console.log('sent raw transaction successfully.');
+								console.log(bs58.encode(signature));
 							} else {
 								console.error(error);
 								reject(error);
@@ -289,6 +321,7 @@ export class LeaderTpuService {
 	 * @returns {Promise<string[]>}
 	 */
 	leaderTpuSockets(fanout_slots: number): Promise<string[]> {
+		console.log(`getting leader sockets with fanout slots ${fanout_slots}`);
 		return this.leaderTpuCache.getLeaderSockets(fanout_slots);
 	}
 
@@ -354,11 +387,16 @@ export class TpuConnection extends Connection {
 	/**
 	 *
 	 * @param transaction {Transaction}
-	 * @param signers {Array<Signer>}
+	 * @param signers {Array<Signer> | SendOptions}
+	 * @param options {SendOptions}
 	 * @returns {Promise<string>}
 	 */
-	sendTransaction(transaction: Transaction, signers: Array<Signer>): Promise<string> {
-		return this.tpuClient.sendTransaction(transaction, signers);
+	async sendTransaction(
+		transaction: VersionedTransaction | Transaction,
+		signersOrOptions?: Array<Signer> | SendOptions,
+		options?: SendOptions,
+	): Promise<TransactionSignature> {
+		return this.tpuClient.sendTransaction(transaction, signersOrOptions, options);
 	}
 
 	//@ts-check
