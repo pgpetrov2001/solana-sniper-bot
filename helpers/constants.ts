@@ -22,6 +22,7 @@ export const NETWORK = 'mainnet-beta';
 export const COMMITMENT_LEVEL: Commitment = retrieveEnvVariable('COMMITMENT_LEVEL', logger) as Commitment;
 export const RPC_ENDPOINT = retrieveEnvVariable('RPC_ENDPOINT', logger);
 export const RPC_WEBSOCKET_ENDPOINT = retrieveEnvVariable('RPC_WEBSOCKET_ENDPOINT', logger);
+export const DISABLE_RETRY_ON_RATE_LIMIT = retrieveEnvVariable('DISABLE_RETRY_ON_RATE_LIMIT', logger) === 'true';
 
 // Bot
 export const LOG_LEVEL = retrieveEnvVariable('LOG_LEVEL', logger);

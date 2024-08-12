@@ -108,18 +108,18 @@ export class Bot {
 		logger.trace({ mint: poolState.baseMint }, `Processing new pool...`);
 
 		if (this.config.useSnipeList && !this.snipeListCache?.isInList(poolState.baseMint.toString())) {
-			logger.debug({ mint: poolState.baseMint.toString() }, `Skipping buy because token is not in a snipe list`);
+			logger.trace({ mint: poolState.baseMint.toString() }, `Skipping buy because token is not in a snipe list`);
 			return;
 		}
 
 		if (this.config.autoBuyDelay > 0) {
-			logger.debug({ mint: poolState.baseMint }, `Waiting for ${this.config.autoBuyDelay} ms before buy`);
+			logger.trace({ mint: poolState.baseMint }, `Waiting for ${this.config.autoBuyDelay} ms before buy`);
 			await sleep(this.config.autoBuyDelay);
 		}
 
 		if (this.config.oneTokenAtATime) {
 			if (this.mutex.isLocked() || this.sellExecutionCount > 0) {
-				logger.debug(
+				logger.trace(
 					{ mint: poolState.baseMint.toString() },
 					`Skipping buy because one token at a time is turned on and token is already being processed`,
 				);

@@ -47,14 +47,17 @@ import {
 	CONSECUTIVE_FILTER_MATCHES,
 	SELL_SKIP_PREFLIGHT,
 	BUY_SKIP_PREFLIGHT,
+	DISABLE_RETRY_ON_RATE_LIMIT,
 } from './helpers';
 import { version } from './package.json';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
+import { TpuTransactionExecutor } from './transactions/tpu-transaction-executor';
 
 const connection = new Connection(RPC_ENDPOINT, {
 	wsEndpoint: RPC_WEBSOCKET_ENDPOINT,
 	commitment: COMMITMENT_LEVEL,
+	disableRetryOnRateLimit: DISABLE_RETRY_ON_RATE_LIMIT,
 });
 
 function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
@@ -154,6 +157,10 @@ const runListener = async () => {
 		}
 		case 'jito': {
 			txExecutor = new JitoTransactionExecutor(CUSTOM_FEE, connection);
+			break;
+		}
+		case 'tpu': {
+			txExecutor = new TpuTransactionExecutor(connection);
 			break;
 		}
 		default: {
