@@ -46,13 +46,15 @@ import {
 	PRICE_CHECK_INTERVAL,
 	SNIPE_LIST_REFRESH_INTERVAL,
 	TRANSACTION_EXECUTOR,
-	WARP_FEE,
+	CUSTOM_FEE,
 	FILTER_CHECK_INTERVAL,
 	FILTER_CHECK_DURATION,
 	CONSECUTIVE_FILTER_MATCHES,
 } from './helpers';
 import { version } from './package.json';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
+import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
+import { TpuTransactionExecutor } from './transactions/tpu-transaction-executor';
 import { ArgumentParser } from 'argparse';
 
 const connection = new Connection(RPC_ENDPOINT, {
@@ -69,7 +71,15 @@ let txExecutor: TransactionExecutor;
 
 switch (TRANSACTION_EXECUTOR) {
 	case 'warp': {
-		txExecutor = new WarpTransactionExecutor(WARP_FEE);
+		txExecutor = new WarpTransactionExecutor(CUSTOM_FEE);
+		break;
+	}
+	case 'jito': {
+		txExecutor = new JitoTransactionExecutor(CUSTOM_FEE, connection);
+		break;
+	}
+	case 'tpu': {
+		txExecutor = new TpuTransactionExecutor(connection);
 		break;
 	}
 	default: {
@@ -77,6 +87,7 @@ switch (TRANSACTION_EXECUTOR) {
 		break;
 	}
 }
+
 
 const wallet = getWallet(PRIVATE_KEY.trim());
 const quoteToken = getToken(QUOTE_MINT);
