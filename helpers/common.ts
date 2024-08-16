@@ -8,3 +8,5 @@ export class Deferred {
 		this.resolve = resolve;
 	});
 }
+
+export const fillArrayFromCallback = (length: number, callback: Function) => new Array(length).fill(0).map(callback());

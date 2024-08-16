@@ -9,10 +9,14 @@ import {
 	getToken,
 	getWallet,
 	logger,
+	sleep,
 	COMMITMENT_LEVEL,
 	RPC_ENDPOINT,
 	RPC_WEBSOCKET_ENDPOINT,
+	PRIVATE_RPC_ENDPOINT,
+	PRIVATE_RPC_WEBSOCKET_ENDPOINT,
 	PRE_LOAD_EXISTING_MARKETS,
+	PRE_LOAD_EXISTING_POOLS,
 	LOG_LEVEL,
 	CHECK_IF_MUTABLE,
 	CHECK_IF_MINT_IS_RENOUNCED,
@@ -60,6 +64,15 @@ const connection = new Connection(RPC_ENDPOINT, {
 	disableRetryOnRateLimit: DISABLE_RETRY_ON_RATE_LIMIT,
 });
 
+let privateConnection: Connection|null = null;
+if (PRIVATE_RPC_ENDPOINT) {
+	privateConnection = new Connection(PRIVATE_RPC_ENDPOINT, {
+		wsEndpoint: PRIVATE_RPC_WEBSOCKET_ENDPOINT,
+		commitment: COMMITMENT_LEVEL,
+		disableRetryOnRateLimit: DISABLE_RETRY_ON_RATE_LIMIT,
+	});
+}
+
 function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
 	logger.info(`  
                                         ..   :-===++++-     
@@ -87,7 +100,7 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
 	logger.info('- Bot -');
 
 	logger.info(
-		`Using ${TRANSACTION_EXECUTOR} executer: ${bot.isWarp || bot.isJito || (TRANSACTION_EXECUTOR === 'default' ? true : false)}`,
+		`Using ${TRANSACTION_EXECUTOR} executor`,
 	);
 	if (bot.isWarp || bot.isJito) {
 		logger.info(`${TRANSACTION_EXECUTOR} fee: ${CUSTOM_FEE}`);
@@ -146,8 +159,9 @@ const runListener = async () => {
 	logger.level = LOG_LEVEL;
 	logger.info('Bot is starting...');
 
-	const marketCache = new MarketCache(connection);
-	const poolCache = new PoolCache();
+	const quoteToken = getToken(QUOTE_MINT);
+	const marketCache = new MarketCache(privateConnection, { quoteToken });
+	const poolCache = new PoolCache(privateConnection, { quoteToken });
 	let txExecutor: TransactionExecutor;
 
 	switch (TRANSACTION_EXECUTOR) {
@@ -170,7 +184,6 @@ const runListener = async () => {
 	}
 
 	const wallet = getWallet(PRIVATE_KEY.trim());
-	const quoteToken = getToken(QUOTE_MINT);
 	const botConfig = <BotConfig>{
 		wallet,
 		quoteAta: getAssociatedTokenAddressSync(quoteToken.mint, wallet.publicKey),
@@ -212,7 +225,14 @@ const runListener = async () => {
 	}
 
 	if (PRE_LOAD_EXISTING_MARKETS) {
-		await marketCache.init({ quoteToken });
+		await marketCache.init();
+	}
+	if (PRE_LOAD_EXISTING_POOLS) {
+		if (PRE_LOAD_EXISTING_MARKETS) {
+			logger.trace(`Sleeping for 2 seconds before fetching pools...`);
+			await sleep(2000);
+		}
+		await poolCache.init();
 	}
 
 	const runTimestamp = Math.floor(new Date().getTime() / 1000);

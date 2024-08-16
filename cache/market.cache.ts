@@ -1,13 +1,19 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { getMinimalMarketV3, logger, MINIMAL_MARKET_STATE_LAYOUT_V3, MinimalMarketLayoutV3 } from '../helpers';
 import { MAINNET_PROGRAM_ID, MARKET_STATE_LAYOUT_V3, Token } from '@raydium-io/raydium-sdk';
+
+import { redisClient } from '../db';
+import { getMinimalMarketV3, logger, MINIMAL_MARKET_STATE_LAYOUT_V3, MinimalMarketLayoutV3 } from '../helpers';
 
 export class MarketCache {
 	private readonly keys: Map<string, MinimalMarketLayoutV3> = new Map<string, MinimalMarketLayoutV3>();
-	constructor(private readonly connection: Connection) {}
+	constructor(private readonly connection: Connection|null = null,
+				private readonly config: { quoteToken: Token }|null = null) {}
 
-	async init(config: { quoteToken: Token }) {
-		logger.debug({}, `Fetching all existing ${config.quoteToken.symbol} markets...`);
+	async init() {
+		if (!this.connection || !this.config) {
+			throw new Error(`Cannot fetch markets, because no connection to an RPC was provided for the market cache.`);
+		}
+		logger.debug({}, `Fetching all existing ${this.config.quoteToken.symbol} markets...`);
 
 		const accounts = await this.connection.getProgramAccounts(MAINNET_PROGRAM_ID.OPENBOOK_MARKET, {
 			commitment: this.connection.commitment,
@@ -20,7 +26,7 @@ export class MarketCache {
 				{
 					memcmp: {
 						offset: MARKET_STATE_LAYOUT_V3.offsetOf('quoteMint'),
-						bytes: config.quoteToken.mint.toBase58(),
+						bytes: this.config.quoteToken.mint.toBase58(),
 					},
 				},
 			],
@@ -34,9 +40,11 @@ export class MarketCache {
 		logger.debug({}, `Cached ${this.keys.size} markets`);
 	}
 
-	public save(marketId: string, keys: MinimalMarketLayoutV3) {
+	public save(marketId: string, keys: MinimalMarketLayoutV3, logging = true) {
 		if (!this.keys.has(marketId)) {
-			logger.trace({}, `Caching new market: ${marketId}`);
+			if (logging) {
+				logger.trace({}, `Caching new market: ${marketId}`);
+			}
 			this.keys.set(marketId, keys);
 		}
 	}
@@ -52,7 +60,14 @@ export class MarketCache {
 		return market;
 	}
 
+	public async has(mint: string): Promise<boolean> {
+		return this.keys.has(mint);
+	}
+
 	private fetch(marketId: string): Promise<MinimalMarketLayoutV3> {
+		if (!this.connection) {
+			throw new Error(`Failed to find market data for marketId ${marketId}, because no connection to an RPC was provided for the market cache.`);
+		}
 		return getMinimalMarketV3(this.connection, new PublicKey(marketId), this.connection.commitment);
 	}
 }

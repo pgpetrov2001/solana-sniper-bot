@@ -3,7 +3,6 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { LiquidityPoolKeysV4 } from '@raydium-io/raydium-sdk';
 import { getPdaMetadataKey } from '@raydium-io/raydium-sdk';
 import {
-	getMetadataAccountDataSerializer,
 	MetadataAccountData,
 	MetadataAccountDataArgs,
 } from '@metaplex-foundation/mpl-token-metadata';

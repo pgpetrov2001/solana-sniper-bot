@@ -5,11 +5,14 @@ import { logger } from './logger';
 
 dotenv.config();
 
-const retrieveEnvVariable = (variableName: string, logger: Logger) => {
-	const variable = process.env[variableName] || '';
-	if (!variable) {
+const retrieveEnvVariable = (variableName: string, logger: Logger, mode: 'required'|'optional' = 'required') => {
+	let variable: any = process.env[variableName] || '';
+	if (mode === 'required' && !variable) {
 		logger.error(`${variableName} is not set`);
 		process.exit(1);
+	}
+	if (mode === 'optional' && !variable) {
+		variable = null;
 	}
 	return variable;
 };
@@ -22,6 +25,8 @@ export const NETWORK = 'mainnet-beta';
 export const COMMITMENT_LEVEL: Commitment = retrieveEnvVariable('COMMITMENT_LEVEL', logger) as Commitment;
 export const RPC_ENDPOINT = retrieveEnvVariable('RPC_ENDPOINT', logger);
 export const RPC_WEBSOCKET_ENDPOINT = retrieveEnvVariable('RPC_WEBSOCKET_ENDPOINT', logger);
+export const PRIVATE_RPC_ENDPOINT = retrieveEnvVariable('PRIVATE_RPC_ENDPOINT', logger, 'optional');
+export const PRIVATE_RPC_WEBSOCKET_ENDPOINT = retrieveEnvVariable('PRIVATE_RPC_WEBSOCKET_ENDPOINT', logger, 'optional');
 export const DISABLE_RETRY_ON_RATE_LIMIT = retrieveEnvVariable('DISABLE_RETRY_ON_RATE_LIMIT', logger) === 'true';
 
 // Bot
@@ -30,9 +35,13 @@ export const ONE_TOKEN_AT_A_TIME = retrieveEnvVariable('ONE_TOKEN_AT_A_TIME', lo
 export const COMPUTE_UNIT_LIMIT = Number(retrieveEnvVariable('COMPUTE_UNIT_LIMIT', logger));
 export const COMPUTE_UNIT_PRICE = Number(retrieveEnvVariable('COMPUTE_UNIT_PRICE', logger));
 export const PRE_LOAD_EXISTING_MARKETS = retrieveEnvVariable('PRE_LOAD_EXISTING_MARKETS', logger) === 'true';
+export const PRE_LOAD_EXISTING_POOLS = retrieveEnvVariable('PRE_LOAD_EXISTING_POOLS', logger) === 'true';
 export const CACHE_NEW_MARKETS = retrieveEnvVariable('CACHE_NEW_MARKETS', logger) === 'true';
 export const TRANSACTION_EXECUTOR = retrieveEnvVariable('TRANSACTION_EXECUTOR', logger);
 export const CUSTOM_FEE = retrieveEnvVariable('CUSTOM_FEE', logger);
+
+// Wallet server
+export const WALLET_SERVER_PORT = Number(retrieveEnvVariable('WALLET_SERVER_PORT', logger));
 
 // Buy
 export const AUTO_BUY_DELAY = Number(retrieveEnvVariable('AUTO_BUY_DELAY', logger));
