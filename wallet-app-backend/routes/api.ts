@@ -12,8 +12,15 @@ router.get('/mint-data/:mint', async (req, res) => {
 	res.json(await wallet.getMintData(req.params.mint));
 });
 
+//TODO: using array query parameters for larger lengths (> 200K) of said arrays would result in 400 (Bad Request)
+
 router.get('/mints-metadata', async (req, res) => {
 	res.json(await wallet.getMintsMetadata(req.query.mints as string[]));
+});
+
+router.post('/cache-mints-pools', async (req, res) => {
+	await wallet.getAndCacheMintsPools(req.body.mints);
+	res.status(200).send();
 });
 
 router.get('/spl-token-sell-execution-info/:mint', async (req, res) => {

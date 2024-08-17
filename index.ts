@@ -18,7 +18,6 @@ import {
 	PRIVATE_RPC_ENDPOINT,
 	PRIVATE_RPC_WEBSOCKET_ENDPOINT,
 	PRE_LOAD_EXISTING_MARKETS,
-	PRE_LOAD_EXISTING_POOLS,
 	LOG_LEVEL,
 	CHECK_IF_MUTABLE,
 	CHECK_IF_MINT_IS_RENOUNCED,
@@ -237,13 +236,6 @@ const runListener = async () => {
 
 	if (PRE_LOAD_EXISTING_MARKETS) {
 		await marketCache.init();
-	}
-	if (PRE_LOAD_EXISTING_POOLS) {
-		if (PRE_LOAD_EXISTING_MARKETS) {
-			logger.trace(`Sleeping for 2 seconds before fetching pools...`);
-			await sleep(2000);
-		}
-		await poolCache.init();
 	}
 
 	const runTimestamp = Math.floor(new Date().getTime() / 1000);

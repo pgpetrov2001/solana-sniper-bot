@@ -278,6 +278,10 @@ export class Wallet {
 		return metadataAccountsData;
 	}
 
+	async getAndCacheMintsPools(rawMintAddresses: string[]): Promise<SavedPool[]> {
+		return await this.poolStorage.getMultiple(rawMintAddresses);
+	}
+
 	async getTokenAccounts(): Promise<TokenAccount[]> {
 		const { value: resp } = await this.connection.getParsedTokenAccountsByOwner(
 			this.config.account.publicKey,

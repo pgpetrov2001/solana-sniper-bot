@@ -15,7 +15,6 @@ import {
 	PRIVATE_RPC_ENDPOINT,
 	PRIVATE_RPC_WEBSOCKET_ENDPOINT,
 	PRE_LOAD_EXISTING_MARKETS,
-	PRE_LOAD_EXISTING_POOLS,
 	LOG_LEVEL,
 	QUOTE_MINT,
 	QUOTE_AMOUNT,
@@ -131,13 +130,6 @@ export const listeners = new Listeners(connection);
 
 	if (PRE_LOAD_EXISTING_MARKETS) {
 		await marketCache.init();
-	}
-	if (PRE_LOAD_EXISTING_POOLS) {
-		if (PRE_LOAD_EXISTING_MARKETS) {
-			logger.trace(`Sleeping for 2 seconds before fetching pools...`);
-			await sleep(2000);
-		}
-		await poolCache.init();
 	}
 
 	await listeners.start({

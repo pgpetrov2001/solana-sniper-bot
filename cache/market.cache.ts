@@ -9,7 +9,7 @@ export class MarketCache {
 	private readonly keys: Map<string, MinimalMarketLayoutV3> = new Map<string, MinimalMarketLayoutV3>();
 	constructor(
 		private readonly connection: Connection|null = null,
-		private readonly raydiumIndexer: GraphQLClient|null = null,
+		private readonly solanaIndexer: GraphQLClient|null = null,
 		private readonly config: { quoteToken: Token }|null = null
 	) {}
 

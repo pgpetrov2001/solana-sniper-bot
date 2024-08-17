@@ -14,6 +14,10 @@ function App() {
 	useEffect(() => {
 		axios.get('http://localhost:8000/api/spl-token-accounts').then(async ({ data }: { data: TokenAccount[] }) => {
 			const mints = data.map(({ mint }) => mint);
+			axios.post(
+				`http://localhost:8000/api/cache-mints-pools`,
+				{ mints },
+			).catch((err) => console.error(`Error caching pools of tokens on server: ${err}`));
 			const { data: metadatasValues } = await axios.get(
 				`http://localhost:8000/api/mints-metadata`,
 				{ params: { mints } }

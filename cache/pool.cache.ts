@@ -2,72 +2,18 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { LIQUIDITY_STATE_LAYOUT_V4, MAINNET_PROGRAM_ID, Token } from '@raydium-io/raydium-sdk';
 import { gql, GraphQLClient } from 'graphql-request';
 import { redisClient } from '../db';
-import { logger, LiquidityStateV4JSON } from '../helpers';
+import {
+	zip,
+	logger,
+	LiquidityStateV4JSON,
+	Raydium_LiquidityPoolv4_query,
+	Raydium_LiquidityPoolv4_Response,
+	standardizeRaydium_LiquidityPoolv4_Response
+} from '../helpers';
 
 function poolDatabaseKey(mint: string) {
 	return `pool-from-mint/${mint}`;
 }
-const raydiumPoolsGraphQuery = gql`
-query MyQuery($where: Raydium_LiquidityPoolv4_bool_exp) {
-	Raydium_LiquidityPoolv4(
-	where: $where
-	) {
-		_updatedAt
-		amountWaveRatio
-		baseDecimal
-		baseLotSize
-		baseMint
-		baseNeedTakePnl
-		baseTotalPnl
-		baseVault
-		depth
-		lpMint
-		lpReserve
-		lpVault
-		marketId
-		marketProgramId
-		maxOrder
-		maxPriceMultiplier
-		minPriceMultiplier
-		minSeparateDenominator
-		minSeparateNumerator
-		minSize
-		nonce
-		openOrders
-		orderbookToInitTime
-		owner
-		pnlDenominator
-		pnlNumerator
-		poolOpenTime
-		punishCoinAmount
-		punishPcAmount
-		quoteDecimal
-		quoteLotSize
-		quoteMint
-		quoteNeedTakePnl
-		quoteTotalPnl
-		quoteVault
-		resetFlag
-		state
-		status
-		swapBase2QuoteFee
-		swapBaseInAmount
-		swapBaseOutAmount
-		swapFeeDenominator
-		swapFeeNumerator
-		swapQuote2BaseFee
-		swapQuoteInAmount
-		swapQuoteOutAmount
-		systemDecimalValue
-		targetOrders
-		tradeFeeDenominator
-		tradeFeeNumerator
-		volMaxCutRatio
-		withdrawQueue
-		pubkey
-	}
-}`;
-
 type SavedPool = { id: string; state: LiquidityStateV4JSON };
 
 export class PoolCache {
@@ -76,54 +22,6 @@ export class PoolCache {
 		private readonly solanaIndexer: GraphQLClient|null = null,
 		private readonly config: { quoteToken: Token }|null = null
 	) {}
-
-	async init(rawMints: string[] | null = null) {
-		if (!this.connection || !this.config) {
-			throw new Error(`Cannot fetch pools, because no connection to an RPC was provided for the pool cache.`);
-		}
-		if (this.solanaIndexer && rawMints) {
-			if (!rawMints) {
-				throw new Error(`Cannot fetch pools, no mints specified.`);
-			}
-			logger.trace({}, `Querying all existing pools with quote ${this.config.quoteToken.symbol} and base one out of ${rawMints.length} mints...`);
-			const variables = {
-				where: {
-					_and: [
-						{ baseMint: { _in: rawMints } },
-						{ quoteMint: { _eq: this.config.quoteToken.mint.toBase58() } },  
-					]
-				}
-			};
-			await this.solanaIndexer.request(raydiumPoolsGraphQuery, variables);
-		} else {
-			logger.debug({}, `Fetching all existing ${this.config.quoteToken.symbol} pools...`);
-
-			console.time(`Fetching ${this.config.quoteToken.symbol} raydium liquidity pools`);
-			const poolsAccounts = await this.connection.getProgramAccounts(MAINNET_PROGRAM_ID.AmmV4, {
-				commitment: this.connection.commitment,
-				filters: [
-					{ dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },
-					{
-						memcmp: {
-							offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('quoteMint'),
-							bytes: this.config.quoteToken.mint.toBase58(),
-						},
-					},
-				],
-			});
-			console.timeEnd(`Fetching ${this.config.quoteToken.symbol} raydium liquidity pools`);
-
-			const resps = await Promise.all(poolsAccounts.map(async (rawPoolAccount) => {
-				const { account: poolAccount, pubkey: poolAddress } = rawPoolAccount;
-				const poolData = JSON.parse(JSON.stringify(
-					LIQUIDITY_STATE_LAYOUT_V4.decode(poolAccount.data)
-				));
-				return await this.save(poolAddress!.toString(), poolData, false);
-			}));
-
-			logger.debug({}, `Cached ${resps.filter((x) => x)} pools`);
-		}
-	}
 
 	public async save(id: string, state: LiquidityStateV4JSON, logging = true): Promise<number> {
 		const mint = state.baseMint.toString();
@@ -150,6 +48,31 @@ export class PoolCache {
 		const { id, state } = await this.fetch(mint);
 		this.save(id, state, false);
 		return { id, state };
+	}
+
+	public async getMultiple(mints: string[]): Promise<SavedPool[]> {
+		const results = new Array(mints.length) as SavedPool[];
+		const mintsToFetch = [] as string[];
+		const mintsToFetchOriginalIndices = [] as number[];
+		for (let i = 0; i < mints.length; i++) {
+			const mint = mints[i];
+			const val = await redisClient.get(poolDatabaseKey(mint));
+			if (val) {
+				results[i] = JSON.parse(val) as SavedPool;
+			} else {
+				mintsToFetch.push(mint);
+				mintsToFetchOriginalIndices.push(i);
+			}
+		}
+		if (mintsToFetch.length) {
+			const poolsToSave = await this.fetchMultiple(mintsToFetch);
+			const resps = await Promise.all(poolsToSave.map(({ id, state }) => this.save(id, state, false)));
+			logger.debug({}, `Cached ${resps.filter((x) => x).length} new pools`);
+			for (const [poolToSave, index] of zip(poolsToSave, mintsToFetchOriginalIndices)) {
+				results[index] = poolToSave;
+			}
+		}
+		return results;
 	}
 
 	public async has(mint: string): Promise<number> {
@@ -191,5 +114,28 @@ export class PoolCache {
 			id: poolAddress!.toString(),
 			state: poolData,
 		};
+	}
+
+	private async fetchMultiple(mints: string[]): Promise<SavedPool[]> {
+		if (!this.solanaIndexer) {
+			throw new Error(`Cannot fetch multiple liquidity pools, because solana indexer was not specified, and fetching many pools one by one is too cost-prohibitive.`);
+		}
+		logger.trace({}, `Querying raydium pools with quote ${this.config.quoteToken.symbol} and base one out of ${mints.length} mints...`);
+		const { Raydium_LiquidityPoolv4: resp } = await this.solanaIndexer.request(
+			Raydium_LiquidityPoolv4_query,
+			{
+				where: {
+					_and: [
+						{ baseMint: { _in: mints } },
+						{ quoteMint: { _eq: this.config.quoteToken.mint.toBase58() } },  
+					]
+				}
+			}
+		) as { Raydium_LiquidityPoolv4: Raydium_LiquidityPoolv4_Response[] };
+		const poolsToSave = resp.map((pool) => ({
+			id: pool.pubkey,
+			state: standardizeRaydium_LiquidityPoolv4_Response(pool)
+		}));
+		return poolsToSave;
 	}
 }
