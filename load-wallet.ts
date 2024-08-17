@@ -3,7 +3,6 @@ import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { MARKET_STATE_LAYOUT_V3, TokenAmount } from '@raydium-io/raydium-sdk';
 import { GraphQLClient } from 'graphql-request';
 
-import { version } from './package.json';
 import {
 	getToken,
 	getWallet,

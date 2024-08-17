@@ -10,6 +10,7 @@ import { DefaultTransactionExecutor, TransactionExecutor } from './transactions/
 import {
 	getToken,
 	getWallet,
+	LiquidityStateV4JSON,
 	logger,
 	sleep,
 	COMMITMENT_LEVEL,
@@ -55,7 +56,6 @@ import {
 	DISABLE_RETRY_ON_RATE_LIMIT,
 	SHYFT_GRAPHQL_API_URL,
 } from './helpers/index.ts';
-import { version } from './package.json.ts';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor.ts';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor.ts';
 import { TpuTransactionExecutor } from './transactions/tpu-transaction-executor.ts';
@@ -99,7 +99,6 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
 
           WARP DRIVE ACTIVATED 🚀🐟
           Made with ❤️ by humans.
-          Version: ${version}                                          
   `);
 
 	const botConfig = bot.config;
@@ -258,7 +257,10 @@ const runListener = async () => {
 		const exists = await poolCache.get(poolState.baseMint.toString());
 
 		if (!exists && poolOpenTime > runTimestamp) {
-			poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
+			const serializedPoolState = JSON.parse(JSON.stringify(
+				poolState
+			)) as LiquidityStateV4JSON;
+			poolCache.save(updatedAccountInfo.accountId.toString(), serializedPoolState);
 			await bot.buy(updatedAccountInfo.accountId, poolState);
 		}
 	});
