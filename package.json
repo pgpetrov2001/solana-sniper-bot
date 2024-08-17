@@ -5,9 +5,9 @@
   "homepage": "https://warp.id",
   "version": "2.0.1",
   "scripts": {
-    "start": "ts-node index.ts",
-    "serve": "ts-node wallet-app-backend/server.ts",
-    "sell": "ts-node sell.ts",
+    "start": "tsx index.ts",
+    "serve": "tsx wallet-app-backend/server.ts",
+    "sell": "tsx sell.ts",
     "tsc": "tsc --noEmit"
   },
   "dependencies": {
