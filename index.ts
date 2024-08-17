@@ -3,10 +3,10 @@ import { AccountLayout, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { GraphQLClient } from 'graphql-request';
 
-import { MarketCache, PoolCache } from './cache';
-import { Listeners } from './listeners';
-import { Bot, BotConfig } from './bot';
-import { DefaultTransactionExecutor, TransactionExecutor } from './transactions';
+import { MarketCache, PoolCache } from './cache/index.ts';
+import { Listeners } from './listeners/index.ts';
+import { Bot, BotConfig } from './bot.ts';
+import { DefaultTransactionExecutor, TransactionExecutor } from './transactions/index.ts';
 import {
 	getToken,
 	getWallet,
@@ -54,11 +54,11 @@ import {
 	BUY_SKIP_PREFLIGHT,
 	DISABLE_RETRY_ON_RATE_LIMIT,
 	SHYFT_GRAPHQL_API_URL,
-} from './helpers';
-import { version } from './package.json';
-import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
-import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
-import { TpuTransactionExecutor } from './transactions/tpu-transaction-executor';
+} from './helpers/index.ts';
+import { version } from './package.json.ts';
+import { WarpTransactionExecutor } from './transactions/warp-transaction-executor.ts';
+import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor.ts';
+import { TpuTransactionExecutor } from './transactions/tpu-transaction-executor.ts';
 
 const connection = new Connection(RPC_ENDPOINT, {
 	wsEndpoint: RPC_WEBSOCKET_ENDPOINT,

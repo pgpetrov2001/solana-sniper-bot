@@ -1,6 +1,6 @@
 import { PublicKey } from '@solana/web3.js';
 import { Liquidity, LiquidityPoolKeys, MAINNET_PROGRAM_ID, Market } from '@raydium-io/raydium-sdk';
-import { MinimalMarketLayoutV3 } from './market';
+import { MinimalMarketLayoutV3 } from './market.ts';
 
 // running JSON.stringify on LiquidityStateV4 converts BN type (big number) from the 'bn.js' lib, to a string type
 // i.e. the value is written in hex format, same for PublicKey

@@ -7,8 +7,8 @@ import {
 	TransactionMessage,
 	VersionedTransaction,
 } from '@solana/web3.js';
-import { TransactionExecutor } from './transaction-executor.interface';
-import { logger } from '../helpers';
+import { TransactionExecutor } from './transaction-executor.interface.ts';
+import { logger } from '../helpers/index.ts';
 import axios, { AxiosError } from 'axios';
 import bs58 from 'bs58';
 import { Currency, CurrencyAmount } from '@raydium-io/raydium-sdk';

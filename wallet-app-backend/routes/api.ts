@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { wallet } from '../../load-wallet';
-import { logger } from '../../helpers';
+import { wallet } from '../../load-wallet.ts';
+import { logger } from '../../helpers/index.ts';
 
 const router = Router();
 

@@ -1,8 +1,8 @@
-import { Filter, FilterResult } from './pool-filters';
+import { Filter, FilterResult } from './pool-filters.ts';
 import { LiquidityPoolKeysV4, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { Connection } from '@solana/web3.js';
 import { AccountLayout, RawAccount } from '@solana/spl-token';
-import { logger, Deferred } from '../helpers';
+import { logger, Deferred } from '../helpers/index.ts';
 
 export class PoolSizeFilter implements Filter {
 	private poolKeys: LiquidityPoolKeysV4 | null = null;

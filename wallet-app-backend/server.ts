@@ -1,15 +1,14 @@
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
-import path from 'path';
 import helmet from 'helmet';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 
 import 'express-async-errors';
 
-import { logger } from '../helpers';
-import apiRoute from './routes/api';
-import proxyRoute from './routes/proxy';
+import { logger } from '../helpers/index.ts';
+import apiRoute from './routes/api.ts';
+import proxyRoute from './routes/proxy.ts';
 
 //Solution to using __dirname in ES modules: https://iamwebwiz.medium.com/how-to-fix-dirname-is-not-defined-in-es-module-scope-34d94a86694d
 import path from 'path';

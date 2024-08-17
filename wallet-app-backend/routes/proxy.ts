@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import axios from 'axios';
-import { logger } from '../../helpers';
+import { logger } from '../../helpers/index.ts';
 
 const router = Router();
 

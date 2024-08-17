@@ -1,8 +1,8 @@
-import { Filter, FilterResult } from './pool-filters';
+import { Filter, FilterResult } from './pool-filters.ts';
 import { TOKEN_PROGRAM_ID, MintLayout, RawMint } from '@solana/spl-token';
 import { Connection } from '@solana/web3.js';
 import { LiquidityPoolKeysV4 } from '@raydium-io/raydium-sdk';
-import { logger, Deferred } from '../helpers';
+import { logger, Deferred } from '../helpers/index.ts';
 
 export class RenouncedFreezeFilter implements Filter {
 	private poolKeys: LiquidityPoolKeysV4 | null = null;

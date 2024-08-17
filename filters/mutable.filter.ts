@@ -1,4 +1,4 @@
-import { Filter, FilterResult } from './pool-filters';
+import { Filter, FilterResult } from './pool-filters.ts';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { LiquidityPoolKeysV4 } from '@raydium-io/raydium-sdk';
 import { getPdaMetadataKey } from '@raydium-io/raydium-sdk';
@@ -7,7 +7,7 @@ import {
 	MetadataAccountDataArgs,
 } from '@metaplex-foundation/mpl-token-metadata';
 import { Serializer } from '@metaplex-foundation/umi/serializers';
-import { logger, Deferred } from '../helpers';
+import { logger, Deferred } from '../helpers/index.ts';
 
 export class MutableFilter implements Filter {
 	private poolKeys: LiquidityPoolKeysV4 | null = null;

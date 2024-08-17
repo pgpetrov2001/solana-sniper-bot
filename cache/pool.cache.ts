@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { LIQUIDITY_STATE_LAYOUT_V4, MAINNET_PROGRAM_ID, Token } from '@raydium-io/raydium-sdk';
 import { gql, GraphQLClient } from 'graphql-request';
-import { redisClient } from '../db';
+import { redisClient } from '../db.ts';
 import {
 	zip,
 	logger,
@@ -9,12 +9,12 @@ import {
 	Raydium_LiquidityPoolv4_query,
 	Raydium_LiquidityPoolv4_Response,
 	standardizeRaydium_LiquidityPoolv4_Response
-} from '../helpers';
+} from '../helpers/index.ts';
 
 function poolDatabaseKey(mint: string) {
 	return `pool-from-mint/${mint}`;
 }
-type SavedPool = { id: string; state: LiquidityStateV4JSON };
+export type SavedPool = { id: string; state: LiquidityStateV4JSON };
 
 export class PoolCache {
 	constructor(
@@ -117,7 +117,7 @@ export class PoolCache {
 	}
 
 	private async fetchMultiple(mints: string[]): Promise<SavedPool[]> {
-		if (!this.solanaIndexer) {
+		if (!this.solanaIndexer || !this.config) {
 			throw new Error(`Cannot fetch multiple liquidity pools, because solana indexer was not specified, and fetching many pools one by one is too cost-prohibitive.`);
 		}
 		logger.trace({}, `Querying raydium pools with quote ${this.config.quoteToken.symbol} and base one out of ${mints.length} mints...`);

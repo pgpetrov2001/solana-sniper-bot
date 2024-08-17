@@ -33,14 +33,14 @@ import {
 	SELL_SKIP_PREFLIGHT,
 	DISABLE_RETRY_ON_RATE_LIMIT,
 	SHYFT_GRAPHQL_API_URL,
-} from './helpers';
-import { MarketCache, PoolCache } from './cache';
-import { Listeners } from './listeners';
-import { DefaultTransactionExecutor, TransactionExecutor } from './transactions';
-import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
-import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
-import { TpuTransactionExecutor } from './transactions/tpu-transaction-executor';
-import { Wallet, WalletConfig } from './wallet';
+} from './helpers/index.ts';
+import { MarketCache, PoolCache } from './cache/index.ts';
+import { Listeners } from './listeners/index.ts';
+import { DefaultTransactionExecutor, TransactionExecutor } from './transactions/index.ts';
+import { WarpTransactionExecutor } from './transactions/warp-transaction-executor.ts';
+import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor.ts';
+import { TpuTransactionExecutor } from './transactions/tpu-transaction-executor.ts';
+import { Wallet, WalletConfig } from './wallet.ts';
 
 logger.level = LOG_LEVEL;
 logger.info('Wallet is loading...');

@@ -1,5 +1,5 @@
 import { createClient } from 'redis';
-import { logger } from './helpers';
+import { logger } from './helpers/index.ts';
 
 export const redisClient = createClient({
 	socket: { 

@@ -1,6 +1,5 @@
 import fs from 'fs';
-import path from 'path';
-import { logger, SNIPE_LIST_REFRESH_INTERVAL } from '../helpers';
+import { logger, SNIPE_LIST_REFRESH_INTERVAL } from '../helpers/index.ts';
 
 //Solution to using __dirname in ES modules: https://iamwebwiz.medium.com/how-to-fix-dirname-is-not-defined-in-es-module-scope-34d94a86694d
 import path from 'path';

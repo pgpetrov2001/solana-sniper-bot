@@ -1,5 +1,5 @@
 import { gql, GraphQLClient } from 'graphql-request';
-import { LiquidityStateV4JSON } from './liquidity';
+import { LiquidityStateV4JSON } from './liquidity.ts';
 
 export const Raydium_LiquidityPoolv4_query = gql`
 query MyQuery($where: Raydium_LiquidityPoolv4_bool_exp) {
@@ -128,5 +128,5 @@ export const standardizeRaydium_LiquidityPoolv4_Response = (resp: Raydium_Liquid
 			  key,
 			  val == null? '': (Array.isArray(val)? val.map((x) => x.toString()): val.toString())
 		  ])
-	);
+	) as LiquidityStateV4JSON;
 };

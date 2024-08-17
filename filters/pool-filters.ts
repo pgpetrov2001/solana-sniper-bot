@@ -1,11 +1,11 @@
 import { Connection } from '@solana/web3.js';
 import { LiquidityPoolKeysV4, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { getMetadataAccountDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
-import { BurnFilter } from './burn.filter';
-import { MutableFilter } from './mutable.filter';
-import { RenouncedFreezeFilter } from './renounced.filter';
-import { PoolSizeFilter } from './pool-size.filter';
-import { CHECK_IF_BURNED, CHECK_IF_FREEZABLE, CHECK_IF_MINT_IS_RENOUNCED, CHECK_IF_MUTABLE, logger } from '../helpers';
+import { BurnFilter } from './burn.filter.ts';
+import { MutableFilter } from './mutable.filter.ts';
+import { RenouncedFreezeFilter } from './renounced.filter.ts';
+import { PoolSizeFilter } from './pool-size.filter.ts';
+import { CHECK_IF_BURNED, CHECK_IF_FREEZABLE, CHECK_IF_MINT_IS_RENOUNCED, CHECK_IF_MUTABLE, logger } from '../helpers/index.ts';
 
 export interface Filter {
 	execute(poolKeysV4: LiquidityPoolKeysV4): Promise<FilterResult>;

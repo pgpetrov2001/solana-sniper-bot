@@ -5,8 +5,8 @@ import {
 	Transaction,
 	VersionedTransaction,
 } from '@solana/web3.js';
-import { TransactionExecutor } from './transaction-executor.interface';
-import { logger } from '../helpers';
+import { TransactionExecutor } from './transaction-executor.interface.ts';
+import { logger } from '../helpers/index.ts';
 
 import { spawn } from "child_process";
 

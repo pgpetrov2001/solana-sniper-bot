@@ -1,9 +1,9 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { MAINNET_PROGRAM_ID, MARKET_STATE_LAYOUT_V3, Token } from '@raydium-io/raydium-sdk';
-import { gql, GraphQLClient } from 'graphql-request/build/entrypoints/main.d.ts';
+import { gql, GraphQLClient } from 'graphql-request';
 
-import { redisClient } from '../db';
-import { getMinimalMarketV3, logger, MINIMAL_MARKET_STATE_LAYOUT_V3, MinimalMarketLayoutV3 } from '../helpers';
+import { redisClient } from '../db.ts';
+import { getMinimalMarketV3, logger, MINIMAL_MARKET_STATE_LAYOUT_V3, MinimalMarketLayoutV3 } from '../helpers/index.ts';
 
 export class MarketCache {
 	private readonly keys: Map<string, MinimalMarketLayoutV3> = new Map<string, MinimalMarketLayoutV3>();
