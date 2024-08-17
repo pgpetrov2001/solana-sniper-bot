@@ -1,8 +1,10 @@
+import { Connection, KeyedAccountInfo, Keypair } from '@solana/web3.js';
+import { AccountLayout, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, Token, TokenAmount } from '@raydium-io/raydium-sdk';
+import { GraphQLClient } from 'graphql-request';
+
 import { MarketCache, PoolCache } from './cache';
 import { Listeners } from './listeners';
-import { Connection, KeyedAccountInfo, Keypair } from '@solana/web3.js';
-import { LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, Token, TokenAmount } from '@raydium-io/raydium-sdk';
-import { AccountLayout, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Bot, BotConfig } from './bot';
 import { DefaultTransactionExecutor, TransactionExecutor } from './transactions';
 import {
@@ -52,6 +54,7 @@ import {
 	SELL_SKIP_PREFLIGHT,
 	BUY_SKIP_PREFLIGHT,
 	DISABLE_RETRY_ON_RATE_LIMIT,
+	SHYFT_GRAPHQL_API_URL,
 } from './helpers';
 import { version } from './package.json';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
@@ -72,6 +75,14 @@ if (PRIVATE_RPC_ENDPOINT) {
 		disableRetryOnRateLimit: DISABLE_RETRY_ON_RATE_LIMIT,
 	});
 }
+
+const graphQLClient = new GraphQLClient(SHYFT_GRAPHQL_API_URL, {
+	method: 'POST',
+	jsonSerializer: {
+		parse: JSON.parse,
+		stringify: JSON.stringify,
+	},
+});
 
 function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
 	logger.info(`  
@@ -160,8 +171,8 @@ const runListener = async () => {
 	logger.info('Bot is starting...');
 
 	const quoteToken = getToken(QUOTE_MINT);
-	const marketCache = new MarketCache(privateConnection, { quoteToken });
-	const poolCache = new PoolCache(privateConnection, { quoteToken });
+	const marketCache = new MarketCache(privateConnection, graphQLClient, { quoteToken });
+	const poolCache = new PoolCache(privateConnection, graphQLClient, { quoteToken });
 	let txExecutor: TransactionExecutor;
 
 	switch (TRANSACTION_EXECUTOR) {

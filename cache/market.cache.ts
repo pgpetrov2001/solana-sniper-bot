@@ -1,13 +1,17 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { MAINNET_PROGRAM_ID, MARKET_STATE_LAYOUT_V3, Token } from '@raydium-io/raydium-sdk';
+import { gql, GraphQLClient } from 'graphql-request/build/entrypoints/main.d.ts';
 
 import { redisClient } from '../db';
 import { getMinimalMarketV3, logger, MINIMAL_MARKET_STATE_LAYOUT_V3, MinimalMarketLayoutV3 } from '../helpers';
 
 export class MarketCache {
 	private readonly keys: Map<string, MinimalMarketLayoutV3> = new Map<string, MinimalMarketLayoutV3>();
-	constructor(private readonly connection: Connection|null = null,
-				private readonly config: { quoteToken: Token }|null = null) {}
+	constructor(
+		private readonly connection: Connection|null = null,
+		private readonly raydiumIndexer: GraphQLClient|null = null,
+		private readonly config: { quoteToken: Token }|null = null
+	) {}
 
 	async init() {
 		if (!this.connection || !this.config) {

@@ -27,7 +27,9 @@
     /* Modules */
     "module": "commonjs",                                /* Specify what module code is generated. */
     // "rootDir": "./",                                  /* Specify the root folder within your source files. */
-    // "moduleResolution": "node10",                     /* Specify how TypeScript looks up a file from a given module specifier. */
+	/* Had to specify this and add "type": "module" to package.json as per: https://www.npmjs.com/package/graphql-request */
+	/* Also to make it work, had to switch to using tsx instead of ts-node as per: https://stackoverflow.com/questions/62096269/cant-run-my-node-js-typescript-project-typeerror-err-unknown-file-extension */
+    "moduleResolution": "nodenext",                      /* Specify how TypeScript looks up a file from a given module specifier. */
     // "baseUrl": "./",                                  /* Specify the base directory to resolve non-relative module names. */
     // "paths": {},                                      /* Specify a set of entries that re-map imports to additional lookup locations. */
     // "rootDirs": [],                                   /* Allow multiple folders to be treated as one when resolving modules. */

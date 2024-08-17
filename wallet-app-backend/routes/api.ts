@@ -16,8 +16,9 @@ router.get('/mints-metadata', async (req, res) => {
 	res.json(await wallet.getMintsMetadata(req.query.mints as string[]));
 });
 
-router.get('/spl-token-price/:mint', async (req, res) => {
-	res.json({ price: await wallet.getTokenPrice(req.params.mint) });
+router.get('/spl-token-sell-execution-info/:mint', async (req, res) => {
+	const amountToSell = req.query.amountToSell as string;
+	res.json(await wallet.getTokenSellExecutionInfo(req.params.mint, amountToSell));
 });
 
 router.get('/ata-buynsell-transactions/:mint/:ata', async (req, res) => {

@@ -2,6 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { logger, SNIPE_LIST_REFRESH_INTERVAL } from '../helpers';
 
+//Solution to using __dirname in ES modules: https://iamwebwiz.medium.com/how-to-fix-dirname-is-not-defined-in-es-module-scope-34d94a86694d
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
+const __dirname = path.dirname(__filename); // get the name of the directory
+
 export class SnipeListCache {
 	private snipeList: string[] = [];
 	private fileLocation = path.join(__dirname, '../snipe-list.txt');

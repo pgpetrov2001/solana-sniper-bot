@@ -1,6 +1,7 @@
 import { Connection, KeyedAccountInfo, Keypair } from '@solana/web3.js';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { MARKET_STATE_LAYOUT_V3, TokenAmount } from '@raydium-io/raydium-sdk';
+import { GraphQLClient } from 'graphql-request';
 
 import { version } from './package.json';
 import {
@@ -32,6 +33,7 @@ import {
 	TRANSACTION_EXECUTOR,
 	SELL_SKIP_PREFLIGHT,
 	DISABLE_RETRY_ON_RATE_LIMIT,
+	SHYFT_GRAPHQL_API_URL,
 } from './helpers';
 import { MarketCache, PoolCache } from './cache';
 import { Listeners } from './listeners';
@@ -59,9 +61,17 @@ if (PRIVATE_RPC_ENDPOINT) {
 	});
 }
 
+const graphQLClient = new GraphQLClient(SHYFT_GRAPHQL_API_URL, {
+	method: 'POST',
+	jsonSerializer: {
+		parse: JSON.parse,
+		stringify: JSON.stringify,
+	},
+});
+
 const quoteToken = getToken(QUOTE_MINT);
-const marketCache = new MarketCache(privateConnection ?? connection, { quoteToken });
-const poolCache = new PoolCache(privateConnection ?? connection, { quoteToken });
+const marketCache = new MarketCache(privateConnection ?? connection, graphQLClient, { quoteToken });
+const poolCache = new PoolCache(privateConnection ?? connection, graphQLClient, { quoteToken });
 let txExecutor: TransactionExecutor;
 
 switch (TRANSACTION_EXECUTOR) {

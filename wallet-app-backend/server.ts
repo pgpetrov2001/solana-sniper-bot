@@ -11,6 +11,12 @@ import { logger } from '../helpers';
 import apiRoute from './routes/api';
 import proxyRoute from './routes/proxy';
 
+//Solution to using __dirname in ES modules: https://iamwebwiz.medium.com/how-to-fix-dirname-is-not-defined-in-es-module-scope-34d94a86694d
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
+const __dirname = path.dirname(__filename); // get the name of the directory
+
 const app = express();
 
 // Basic middleware

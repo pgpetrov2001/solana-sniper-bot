@@ -9,7 +9,7 @@ import { Button, CardActionArea, CardActions } from '@mui/material';
 import { PublicKey } from '@solana/web3.js';
 import { MetadataAccountData, JsonMetadata } from '@metaplex-foundation/mpl-token-metadata';
 
-import { MintAccount, TokenAccount } from '../../../wallet';
+import { MintAccount, TokenAccount, SwapExecutionInfoJSON } from '../../../wallet';
 
 const disableCacheHeaders = {
 	'Cache-Control': 'no-cache',
@@ -26,7 +26,7 @@ export default function TokenCard({ tokenMetadata, mintMetadata }: { tokenMetada
 	const { mint, address, owner, tokenAmount } = mintMetadata;
 	const { symbol, uri, isMutable, updateAuthority, tokenStandard } = tokenMetadata;
 
-	const [ price, setPrice ] = useState(null);
+	const [ sellExecutionInfo, setSellExecutionInfo ] = useState({} as Partial<SwapExecutionInfoJSON>);
 	const [ tokenJsonMetadata, setTokenJsonMetadata ] = useState({} as Partial<JsonMetadata>);
 	const [ buyAndSellTransactions, setBuyAndSellTransactions ] = useState([] as SwapTransaction[]);
 	const [ buyTransaction, setBuyTransaction ] = useState(null as SwapTransaction|null);
@@ -34,13 +34,15 @@ export default function TokenCard({ tokenMetadata, mintMetadata }: { tokenMetada
 	const refreshPrice = async () => {
 		try {
 			const { data } = await axios.get(
-				`http://localhost:8000/api/spl-token-price/${mint}`,
-				{ headers: disableCacheHeaders }
-			);
-			const { price } = data;
-			setPrice(price);
+				`http://localhost:8000/api/spl-token-sell-execution-info/${mint}`,
+				{
+					params: { amountToSell: tokenAmount.amount },
+					headers: disableCacheHeaders,
+				},
+			) as { data: SwapExecutionInfoJSON };
+			setSellExecutionInfo(data);
 		} catch(err: any) {
-			alert(`Fetching token price failed with: ${err.message}`);
+			alert(`Fetching token sell execution info failed with: ${err.message}`);
 		}
 	};
 	const refreshBuyAndSellTransactions = async () => {
@@ -95,7 +97,7 @@ export default function TokenCard({ tokenMetadata, mintMetadata }: { tokenMetada
 				{buyTransaction? `${buyTransaction.balanceChanges[mint.toString()]} ${symbol}` : 'N/A'}<br/>
 				{buyTransaction? `${buyTransaction.balanceChanges['So11111111111111111111111111111111111111112']} WSOL` : 'N/A'}<br/>
 				<a href={buyTransaction? `https://solscan.io/tx/${buyTransaction.signature}` : 'N/A'} target="_blank" rel="noreferrer">View on Solscan</a><br/>
-				Price: {price ?? 'N/A'}<br/>
+				Price: {sellExecutionInfo.currentPrice ?? 'N/A'}<br/>
 			</>
           {/* <Typography variant="body2" color="text.secondary"> */}
 			  {/* <>Mint: {mint}</> */}

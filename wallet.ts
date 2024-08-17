@@ -9,7 +9,17 @@ import {
 	PublicKey,
 } from '@solana/web3.js';
 import { getAccount, TOKEN_PROGRAM_ID, } from '@solana/spl-token';
-import { MAINNET_PROGRAM_ID, Liquidity, LiquidityPoolKeysV4, getPdaMetadataKey,  Percent, Token, TokenAmount } from '@raydium-io/raydium-sdk';
+import {
+	MAINNET_PROGRAM_ID,
+	Liquidity,
+	LiquidityPoolKeysV4,
+	getPdaMetadataKey,
+	Percent,
+	Token,
+	TokenAmount,
+	CurrencyAmount,
+	Price,
+} from '@raydium-io/raydium-sdk';
 import {
 	mplTokenMetadata,
 	getMetadataAccountDataSerializer,
@@ -53,6 +63,40 @@ export interface WalletConfig {
 	stopLoss: number;
 	sellSlippage: number;
 	sellSkipPreflight: boolean;
+}
+
+export type SwapExecutionInfo =
+	| {
+        amountOut: CurrencyAmount
+        minAmountOut: CurrencyAmount
+        currentPrice: Price
+        executionPrice: Price | null
+        priceImpact: Percent
+        fee: CurrencyAmount
+      }
+    | {
+        amountOut: TokenAmount
+        minAmountOut: TokenAmount
+        currentPrice: Price
+        executionPrice: Price | null
+        priceImpact: Percent
+        fee: CurrencyAmount
+	};
+
+export interface SwapExecutionInfoJSON {
+	amountOut: string;
+	minAmountOut: string;
+	currentPrice: string;
+	executionPrice: string | null;
+	fee: string; // fee is in the input currency
+};
+
+function safeFractionToFixed(fraction: Price|CurrencyAmount|Percent): string {
+	try {
+		return fraction.toFixed();
+	} catch(err: any) {
+		return '0';
+	}
 }
 
 type BalanceMap = { [key: string]: { [key: string]: bigint } };
@@ -255,7 +299,7 @@ export class Wallet {
 		));
 	}
 
-	async getTokenPrice(rawMintAddress: string): Promise<string> {
+	async getTokenSellExecutionInfo(rawMintAddress: string, rawAmountToSell: string): Promise<SwapExecutionInfoJSON> {
 		const mint = new PublicKey(rawMintAddress);
 		const poolData = await this.poolStorage.get(mint.toString());
 		const market = await this.marketStorage.get(poolData.state.marketId.toString());
@@ -265,14 +309,22 @@ export class Wallet {
 			poolKeys,
 		});
 		const slippagePercent = new Percent(this.config.sellSlippage, 100);
-		const { amountOut } = Liquidity.computeAmountOut({
+		const tokenToSell = new Token(TOKEN_PROGRAM_ID, mint, Number(poolData.state.baseDecimal));
+		const amountIn = new TokenAmount(tokenToSell, BigInt(rawAmountToSell), true);
+		const resp = Liquidity.computeAmountOut({
 			poolKeys,
 			poolInfo,
-			amountIn: this.config.quoteAmount, //TODO: change this to the actual amount the user would want to sell
+			amountIn,
 			currencyOut: this.config.quoteToken,
 			slippage: slippagePercent,
 		});
-		return amountOut.toFixed();
+		return {
+			amountOut: safeFractionToFixed(resp.amountOut),
+			minAmountOut: safeFractionToFixed(resp.minAmountOut),
+			currentPrice: safeFractionToFixed(resp.currentPrice),
+			executionPrice: resp.executionPrice? safeFractionToFixed(resp.executionPrice): null,
+			fee: safeFractionToFixed(resp.fee),
+		};
 	}
 
 	private async getAtaTransactions(ata: PublicKey): Promise<ParsedTransactionWithMeta[]> {

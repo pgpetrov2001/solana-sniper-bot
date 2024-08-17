@@ -220,7 +220,7 @@ export class Bot {
 				return;
 			}
 
-			const tokenIn = new Token(TOKEN_PROGRAM_ID, poolData.state.baseMint, poolData.state.baseDecimal.toNumber());
+			const tokenIn = new Token(TOKEN_PROGRAM_ID, poolData.state.baseMint, Number(poolData.state.baseDecimal));
 			const tokenAmountIn = new TokenAmount(tokenIn, rawAccount.amount, true);
 
 			if (tokenAmountIn.isZero()) {

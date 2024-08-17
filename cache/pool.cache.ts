@@ -1,49 +1,128 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { LIQUIDITY_STATE_LAYOUT_V4, MAINNET_PROGRAM_ID, Token } from '@raydium-io/raydium-sdk';
+import { gql, GraphQLClient } from 'graphql-request';
 import { redisClient } from '../db';
 import { logger, LiquidityStateV4JSON } from '../helpers';
 
 function poolDatabaseKey(mint: string) {
 	return `pool-from-mint/${mint}`;
 }
+const raydiumPoolsGraphQuery = gql`
+query MyQuery($where: Raydium_LiquidityPoolv4_bool_exp) {
+	Raydium_LiquidityPoolv4(
+	where: $where
+	) {
+		_updatedAt
+		amountWaveRatio
+		baseDecimal
+		baseLotSize
+		baseMint
+		baseNeedTakePnl
+		baseTotalPnl
+		baseVault
+		depth
+		lpMint
+		lpReserve
+		lpVault
+		marketId
+		marketProgramId
+		maxOrder
+		maxPriceMultiplier
+		minPriceMultiplier
+		minSeparateDenominator
+		minSeparateNumerator
+		minSize
+		nonce
+		openOrders
+		orderbookToInitTime
+		owner
+		pnlDenominator
+		pnlNumerator
+		poolOpenTime
+		punishCoinAmount
+		punishPcAmount
+		quoteDecimal
+		quoteLotSize
+		quoteMint
+		quoteNeedTakePnl
+		quoteTotalPnl
+		quoteVault
+		resetFlag
+		state
+		status
+		swapBase2QuoteFee
+		swapBaseInAmount
+		swapBaseOutAmount
+		swapFeeDenominator
+		swapFeeNumerator
+		swapQuote2BaseFee
+		swapQuoteInAmount
+		swapQuoteOutAmount
+		systemDecimalValue
+		targetOrders
+		tradeFeeDenominator
+		tradeFeeNumerator
+		volMaxCutRatio
+		withdrawQueue
+		pubkey
+	}
+}`;
 
 type SavedPool = { id: string; state: LiquidityStateV4JSON };
 
 export class PoolCache {
-	constructor(private readonly connection: Connection|null = null,
-				private readonly config: { quoteToken: Token }|null = null) {}
+	constructor(
+		private readonly connection: Connection|null = null,
+		private readonly solanaIndexer: GraphQLClient|null = null,
+		private readonly config: { quoteToken: Token }|null = null
+	) {}
 
-	async init() {
-		//TODO: make this interoperable with redis cache
+	async init(rawMints: string[] | null = null) {
 		if (!this.connection || !this.config) {
 			throw new Error(`Cannot fetch pools, because no connection to an RPC was provided for the pool cache.`);
 		}
-		logger.debug({}, `Fetching all existing ${this.config.quoteToken.symbol} pools...`);
+		if (this.solanaIndexer && rawMints) {
+			if (!rawMints) {
+				throw new Error(`Cannot fetch pools, no mints specified.`);
+			}
+			logger.trace({}, `Querying all existing pools with quote ${this.config.quoteToken.symbol} and base one out of ${rawMints.length} mints...`);
+			const variables = {
+				where: {
+					_and: [
+						{ baseMint: { _in: rawMints } },
+						{ quoteMint: { _eq: this.config.quoteToken.mint.toBase58() } },  
+					]
+				}
+			};
+			await this.solanaIndexer.request(raydiumPoolsGraphQuery, variables);
+		} else {
+			logger.debug({}, `Fetching all existing ${this.config.quoteToken.symbol} pools...`);
 
-		console.time(`Fetching ${this.config.quoteToken.symbol} raydium liquidity pools`);
-		const poolsAccounts = await this.connection.getProgramAccounts(MAINNET_PROGRAM_ID.AmmV4, {
-			commitment: this.connection.commitment,
-			filters: [
-				{ dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },
-				{
-					memcmp: {
-						offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('quoteMint'),
-						bytes: this.config.quoteToken.mint.toBase58(),
+			console.time(`Fetching ${this.config.quoteToken.symbol} raydium liquidity pools`);
+			const poolsAccounts = await this.connection.getProgramAccounts(MAINNET_PROGRAM_ID.AmmV4, {
+				commitment: this.connection.commitment,
+				filters: [
+					{ dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },
+					{
+						memcmp: {
+							offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('quoteMint'),
+							bytes: this.config.quoteToken.mint.toBase58(),
+						},
 					},
-				},
-			],
-		});
-		console.timeEnd(`Fetching ${this.config.quoteToken.symbol} raydium liquidity pools`);
+				],
+			});
+			console.timeEnd(`Fetching ${this.config.quoteToken.symbol} raydium liquidity pools`);
 
-		const resps = await Promise.all(poolsAccounts.map(async (rawPoolAccount) => {
-			const { account: poolAccount, pubkey: poolAddress } = rawPoolAccount;
-			const poolData = JSON.parse(JSON.stringify(
-				LIQUIDITY_STATE_LAYOUT_V4.decode(poolAccount.data)
-			));
-			return await this.save(poolAddress!.toString(), poolData, false);
-		}));
+			const resps = await Promise.all(poolsAccounts.map(async (rawPoolAccount) => {
+				const { account: poolAccount, pubkey: poolAddress } = rawPoolAccount;
+				const poolData = JSON.parse(JSON.stringify(
+					LIQUIDITY_STATE_LAYOUT_V4.decode(poolAccount.data)
+				));
+				return await this.save(poolAddress!.toString(), poolData, false);
+			}));
 
-		logger.debug({}, `Cached ${resps.filter((x) => x)} pools`);
+			logger.debug({}, `Cached ${resps.filter((x) => x)} pools`);
+		}
 	}
 
 	public async save(id: string, state: LiquidityStateV4JSON, logging = true): Promise<number> {

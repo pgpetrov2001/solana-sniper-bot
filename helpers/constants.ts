@@ -27,6 +27,7 @@ export const RPC_ENDPOINT = retrieveEnvVariable('RPC_ENDPOINT', logger);
 export const RPC_WEBSOCKET_ENDPOINT = retrieveEnvVariable('RPC_WEBSOCKET_ENDPOINT', logger);
 export const PRIVATE_RPC_ENDPOINT = retrieveEnvVariable('PRIVATE_RPC_ENDPOINT', logger, 'optional');
 export const PRIVATE_RPC_WEBSOCKET_ENDPOINT = retrieveEnvVariable('PRIVATE_RPC_WEBSOCKET_ENDPOINT', logger, 'optional');
+export const SHYFT_GRAPHQL_API_URL = retrieveEnvVariable('SHYFT_GRAPHQL_API_URL', logger);
 export const DISABLE_RETRY_ON_RATE_LIMIT = retrieveEnvVariable('DISABLE_RETRY_ON_RATE_LIMIT', logger) === 'true';
 
 // Bot
