@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import React from 'react';
 import axios from 'axios';
 import Card from '@mui/material/Card';
@@ -7,10 +7,11 @@ import CardMedia from '@mui/material/CardMedia';
 import Typography from '@mui/material/Typography';
 import { Button, CardActionArea, CardActions } from '@mui/material';
 
-import { PublicKey } from '@solana/web3.js';
-import { MetadataAccountData, JsonMetadata } from '@metaplex-foundation/mpl-token-metadata';
+import { JsonMetadata } from '@metaplex-foundation/mpl-token-metadata';
 
 import { MintAccount, TokenAccount, SwapExecutionInfoJSON } from '../../../wallet';
+
+import { TokensAuxiliaryDataContext } from '../App';
 
 const disableCacheHeaders = {
 	'Cache-Control': 'no-cache',
@@ -23,19 +24,20 @@ type SwapTransaction = {
 	balanceChanges: { [key: string]: string },
 };
 
-export default function TokenCard({ tokenMetadata, mintMetadata }: { tokenMetadata: Partial<MetadataAccountData>, mintMetadata: TokenAccount }) {
-	const { mint, address, owner, tokenAmount } = mintMetadata;
-	const { symbol, uri, isMutable, updateAuthority, tokenStandard } = tokenMetadata;
+export default function TokenCard({ tokenAccountData, index }: { tokenAccountData: TokenAccount, index: number }) {
+	const { mint, address, owner, tokenAmount } = tokenAccountData;
+
+	const [ tokensAuxiliaryDatas, setTokensAuxiliaryDatas ] = useContext(TokensAuxiliaryDataContext);
 
 	const [ sellExecutionInfo, setSellExecutionInfo ] = useState({} as Partial<SwapExecutionInfoJSON>);
 	const [ tokenJsonMetadata, setTokenJsonMetadata ] = useState({} as Partial<JsonMetadata>);
 	const [ buyAndSellTransactions, setBuyAndSellTransactions ] = useState([] as SwapTransaction[]);
 	const [ buyTransaction, setBuyTransaction ] = useState(null as SwapTransaction|null);
 
-	const refreshPrice = async () => {
+	const refreshSellExecutionInfo = async () => {
 		try {
 			const { data } = await axios.get(
-				`http://localhost:8000/api/spl-token-sell-execution-info/${mint}`,
+				`http://localhost:8000/api/get-mint-sell-execution-info/${mint}`,
 				{
 					params: { amountToSell: tokenAmount.amount },
 					headers: disableCacheHeaders,
@@ -59,13 +61,19 @@ export default function TokenCard({ tokenMetadata, mintMetadata }: { tokenMetada
 	};
 	const sellAll = async () => {};
 
+	const { symbol, uri, isMutable, updateAuthority, tokenStandard } = tokensAuxiliaryDatas[index]?.metadata ?? {};
+
 	useEffect(() => {
-		refreshBuyAndSellTransactions();
-	}, [mint, address]);
+		setSellExecutionInfo(tokensAuxiliaryDatas[index]?.sellExecutionInfo ?? {});
+	}, [tokensAuxiliaryDatas]);
+
+	useEffect(() => {
+		setBuyAndSellTransactions(tokensAuxiliaryDatas[index]?.buyAndSellTransactions ?? []);
+	}, [tokensAuxiliaryDatas]);
 
 	useEffect(() => {
 		setBuyTransaction(
-			buyAndSellTransactions.find((tx) => Number(tx.balanceChanges[mint.toString()] ?? 0) > 0) ?? null
+			buyAndSellTransactions.find((tx) => Number(tx.balanceChanges[mint] ?? 0) > 0) ?? null
 		);
 	}, [mint, buyAndSellTransactions])
 
@@ -119,7 +127,7 @@ export default function TokenCard({ tokenMetadata, mintMetadata }: { tokenMetada
 					  <td colSpan={2}><Button size="small" color="primary"><a className="buttonlink" href={`https://dexscreener.com/solana/${mint}?maker=${owner}`} target="_blank" rel="noreferrer">View Mint on DexScreener</a></Button></td>
 				  </tr>
 				  <tr>
-					  <td colSpan={2}><Button size="small" color="primary" onClick={() => refreshPrice()}>Refresh price</Button></td>
+					  <td colSpan={2}><Button size="small" color="primary" onClick={() => refreshSellExecutionInfo()}>Refresh price</Button></td>
 				  </tr>
 				  <tr>
 					  <td colSpan={2}><Button size="small" color="primary" onClick={() => refreshBuyAndSellTransactions()}>Refresh txs</Button></td>

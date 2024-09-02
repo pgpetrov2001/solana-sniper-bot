@@ -1,6 +1,6 @@
 export const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const range = (n: number) => [...Array(n).keys()];
+export const range = (n: number) => new Array(n).fill(0).map((_: number, i: number) => i);
 
 //as per: https://stackoverflow.com/questions/62116454/how-to-type-define-a-zip-function-in-typescript
 export function zip<T extends unknown[][]>(

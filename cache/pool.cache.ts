@@ -1,14 +1,14 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { LIQUIDITY_STATE_LAYOUT_V4, MAINNET_PROGRAM_ID, Token } from '@raydium-io/raydium-sdk';
+import { LIQUIDITY_STATE_LAYOUT_V4, LiquidityStateV4, MAINNET_PROGRAM_ID, Token } from '@raydium-io/raydium-sdk';
 import { gql, GraphQLClient } from 'graphql-request';
 import { redisClient } from '../db.ts';
 import {
 	zip,
 	logger,
 	LiquidityStateV4JSON,
-	Raydium_LiquidityPoolv4_query,
-	Raydium_LiquidityPoolv4_Response,
-	standardizeRaydium_LiquidityPoolv4_Response
+	LiquidityStateV4GraphqlQuery,
+	LiquidityStateV4GraphqlResponse,
+	parseLiquidityStateV4GraphqlResponse,
 } from '../helpers/index.ts';
 
 function poolDatabaseKey(mint: string) {
@@ -23,7 +23,7 @@ export class PoolCache {
 		private readonly config: { quoteToken: Token }|null = null
 	) {}
 
-	public async save(id: string, state: LiquidityStateV4JSON, logging = true): Promise<number> {
+	public async save(id: string, state: LiquidityStateV4|LiquidityStateV4JSON, logging = true): Promise<number> {
 		const mint = state.baseMint.toString();
 		const exists = await redisClient.exists(poolDatabaseKey(mint));
 		if (!exists) {
@@ -121,8 +121,8 @@ export class PoolCache {
 			throw new Error(`Cannot fetch multiple liquidity pools, because solana indexer was not specified, and fetching many pools one by one is too cost-prohibitive.`);
 		}
 		logger.trace({}, `Querying raydium pools with quote ${this.config.quoteToken.symbol} and base one out of ${mints.length} mints...`);
-		const { Raydium_LiquidityPoolv4: resp } = await this.solanaIndexer.request(
-			Raydium_LiquidityPoolv4_query,
+		const resp = await this.solanaIndexer.request(
+			LiquidityStateV4GraphqlQuery,
 			{
 				where: {
 					_and: [
@@ -131,11 +131,14 @@ export class PoolCache {
 					]
 				}
 			}
-		) as { Raydium_LiquidityPoolv4: Raydium_LiquidityPoolv4_Response[] };
-		const poolsToSave = resp.map((pool) => ({
-			id: pool.pubkey,
-			state: standardizeRaydium_LiquidityPoolv4_Response(pool)
+		) as LiquidityStateV4GraphqlResponse;
+		const indexOfMint = Object.fromEntries(
+			mints.map((mint: string, i: number) => [mint, i])
+		);
+		const pools = parseLiquidityStateV4GraphqlResponse(resp).map(([ pubkey, state ]) => ({
+			id: pubkey,
+			state
 		}));
-		return poolsToSave;
+		return pools.sort((a, b) => indexOfMint[a.state.baseMint] - indexOfMint[b.state.baseMint]);
 	}
 }
