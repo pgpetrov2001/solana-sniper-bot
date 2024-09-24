@@ -5,82 +5,84 @@ import { LiquidityPoolKeysV4 } from '@raydium-io/raydium-sdk';
 import { logger, Deferred } from '../helpers/index.ts';
 
 export class BurnFilter implements Filter {
-	private poolKeys: LiquidityPoolKeysV4 | null = null;
-	private retrieveDeferred = new Deferred();
-	private subscription: number | null = null;
+    private poolKeys: LiquidityPoolKeysV4 | null = null;
+    private retrieveDeferred = new Deferred();
+    private subscription: number | null = null;
 
-	constructor(private readonly connection: Connection) {}
+    constructor(private readonly connection: Connection) {}
 
-	private resolve(burned: boolean): FilterResult {
-		return {
-			ok: burned,
-			message: burned ? 'Burned -> LP token for current supply has been burned' : "Burned -> Creator didn't burn LP",
-		};
-	}
+    private resolve(burned: boolean): FilterResult {
+        return {
+            ok: burned,
+            message: burned
+                ? 'Burned -> LP token for current supply has been burned'
+                : "Burned -> Creator didn't burn LP",
+        };
+    }
 
-	private reject(error: any, poolKeys: LiquidityPoolKeysV4): FilterResult {
-		if (error.code == -32602) {
-			return { ok: true };
-		}
+    private reject(error: any, poolKeys: LiquidityPoolKeysV4): FilterResult {
+        if (error.code == -32602) {
+            return { ok: true };
+        }
 
-		return { ok: false, message: 'Failed to check if LP is burned', listenerStopped: error.listenerStopped };
-	}
+        return { ok: false, message: 'Failed to check if LP is burned', listenerStopped: error.listenerStopped };
+    }
 
-	async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
-		try {
-			const amount = await this.connection.getTokenSupply(poolKeys.lpMint, this.connection.commitment);
-			const burned = amount.value.uiAmount === 0;
-			return this.resolve(burned);
-		} catch (e: any) {
-			return this.reject(e, poolKeys);
-		}
-	}
+    async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
+        try {
+            const amount = await this.connection.getTokenSupply(poolKeys.lpMint, this.connection.commitment);
+            const burned = amount.value.uiAmount === 0;
+            return this.resolve(burned);
+        } catch (e: any) {
+            return this.reject(e, poolKeys);
+        }
+    }
 
-	async retrieve(): Promise<FilterResult> {
-		let mintData;
-		try {
-			mintData = await this.recv();
-		} catch (e: any) {
-			e.listenerStopped = true;
-			return this.reject(e, this.poolKeys!);
-		}
-		const burned = mintData.supply === BigInt(0);
-		return this.resolve(burned);
-	}
+    async retrieve(): Promise<FilterResult> {
+        let mintData;
+        try {
+            mintData = await this.recv();
+        } catch (e: any) {
+            e.listenerStopped = true;
+            return this.reject(e, this.poolKeys!);
+        }
+        const burned = mintData.supply === BigInt(0);
+        return this.resolve(burned);
+    }
 
-	listen(poolKeys: LiquidityPoolKeysV4) {
-		this.poolKeys = poolKeys;
-		this.retrieveDeferred = new Deferred();
-		this.subscription = this.connection.onAccountChange(
-			poolKeys.lpMint,
-			async (updatedAccountInfo) => {
-				const mintData = MintLayout.decode(updatedAccountInfo.data);
-				this.retrieveDeferred.resolve(mintData);
-			},
-			this.connection.commitment,
-		);
-		logger.trace(
-			{ mint: poolKeys.baseMint },
-			`Listening for changes of supply of LP token with mint ${poolKeys.lpMint}`,
-		);
-	}
+    listen(poolKeys: LiquidityPoolKeysV4) {
+        this.poolKeys = poolKeys;
+        this.retrieveDeferred = new Deferred();
+        this.subscription = this.connection.onAccountChange(
+            poolKeys.lpMint,
+            async (updatedAccountInfo) => {
+                const mintData = MintLayout.decode(updatedAccountInfo.data);
+                this.retrieveDeferred.resolve(mintData);
+            },
+            this.connection.commitment,
+        );
+        logger.trace(
+            { mint: poolKeys.baseMint },
+            `Listening for changes of supply of LP token with mint ${poolKeys.lpMint}`,
+        );
+    }
 
-	async stop() {
-		const subscription = this.subscription;
-		this.subscription = null;
-		if (subscription != null) {
-			await this.connection.removeAccountChangeListener(subscription);
-		}
-		this.retrieveDeferred.reject(
-			new Error(
-				`Attempted to retrieve update on filter but listener for burn filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
-			),
-		);
-	}
+    async stop() {
+        const subscription = this.subscription;
+        this.subscription = null;
+        if (subscription != null) {
+            await this.connection.removeAccountChangeListener(subscription);
+        }
+        this.retrieveDeferred.reject(
+            new Error(
+                `Attempted to retrieve update on filter but listener for burn filter for token with mint ${this.poolKeys!.baseMint} has been stopped`,
+            ),
+        );
+    }
 
-	private async recv(): Promise<RawMint> {
-		const ret = (await this.retrieveDeferred.promise) as RawMint;
-		this.retrieveDeferred = new Deferred();
-		return ret;
-	}
+    private async recv(): Promise<RawMint> {
+        const ret = (await this.retrieveDeferred.promise) as RawMint;
+        this.retrieveDeferred = new Deferred();
+        return ret;
+    }
 }

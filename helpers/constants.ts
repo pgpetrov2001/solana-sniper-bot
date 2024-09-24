@@ -5,16 +5,16 @@ import { logger } from './logger.ts';
 
 dotenv.config();
 
-const retrieveEnvVariable = (variableName: string, logger: Logger, mode: 'required'|'optional' = 'required') => {
-	let variable: any = process.env[variableName] || '';
-	if (mode === 'required' && !variable) {
-		logger.error(`${variableName} is not set`);
-		process.exit(1);
-	}
-	if (mode === 'optional' && !variable) {
-		variable = null;
-	}
-	return variable;
+const retrieveEnvVariable = (variableName: string, logger: Logger, mode: 'required' | 'optional' = 'required') => {
+    let variable: any = process.env[variableName] || '';
+    if (mode === 'required' && !variable) {
+        logger.error(`${variableName} is not set`);
+        process.exit(1);
+    }
+    if (mode === 'optional' && !variable) {
+        variable = null;
+    }
+    return variable;
 };
 
 // Wallet

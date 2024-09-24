@@ -8,32 +8,33 @@ export const MINIMAL_MARKET_STATE_LAYOUT_V3 = struct([publicKey('eventQueue'), p
 export type MinimalMarketStateLayoutV3 = typeof MINIMAL_MARKET_STATE_LAYOUT_V3;
 export type MinimalMarketLayoutV3 = GetStructureSchema<MinimalMarketStateLayoutV3>;
 export type MinimalMarketLayoutV3JSON = {
-	eventQueue: string;
-	bids: string;
-	asks: string;
+    eventQueue: string;
+    bids: string;
+    asks: string;
 };
 
 export const MinimalMarketLayoutV3Query = gql`
-query MyQuery($where: OpenbookV1_Market_bool_exp) {
-	OpenbookV1_Market(
-		where: $where,
-	) {
-		asks
-		bids
-		eventQueue
-		pubkey
-	}
-}`;
+    query MyQuery($where: OpenbookV1_Market_bool_exp) {
+        OpenbookV1_Market(where: $where) {
+            asks
+            bids
+            eventQueue
+            pubkey
+        }
+    }
+`;
 
 export type MinimalMarketLayoutV3Response = {
-	OpenbookV1_Market: {
-		asks: string|null;
-		bids: string|null;
-		eventQueue: string|null;
-		pubkey: string;
-	}[]
+    OpenbookV1_Market: {
+        asks: string | null;
+        bids: string | null;
+        eventQueue: string | null;
+        pubkey: string;
+    }[];
 };
 
-export const parseMinimalMarketLayoutV3GraphqlResponse = ({ OpenbookV1_Market: items }: MinimalMarketLayoutV3Response) => {
-	return parseGraphqlResponse(items) as [string, MinimalMarketLayoutV3JSON][];
+export const parseMinimalMarketLayoutV3GraphqlResponse = ({
+    OpenbookV1_Market: items,
+}: MinimalMarketLayoutV3Response) => {
+    return parseGraphqlResponse(items) as [string, MinimalMarketLayoutV3JSON][];
 };

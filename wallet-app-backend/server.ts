@@ -26,12 +26,12 @@ app.use(cookieParser(process.env.COOKIE_SECRET));
 
 // Show routes called in console during development
 if (process.env.NODE_ENVIRONMENT !== 'test') {
-	app.use(morgan('dev'));
+    app.use(morgan('dev'));
 }
 
 // Security
 if (process.env.NODE_ENVIRONMENT === 'production') {
-	app.use(helmet());
+    app.use(helmet());
 }
 
 // Set views directory (html)
@@ -46,7 +46,7 @@ app.use('/api/', apiRoute);
 app.use('/proxy/', proxyRoute);
 
 app.listen(process.env.WALLET_SERVER_PORT, () => {
-	logger.info(`Server started on port ${process.env.WALLET_SERVER_PORT}`);
+    logger.info(`Server started on port ${process.env.WALLET_SERVER_PORT}`);
 });
 
 export default app;
