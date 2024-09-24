@@ -30,7 +30,7 @@ import {
 import { redisClient } from './db.ts';
 import { MarketCache, PoolCache, SnipeListCache, SavedPool } from './cache/index.ts';
 import { TransactionExecutor } from './transactions/index.ts';
-import { createPoolKeys, LiquidityStateV4JSON, logger } from './helpers/index.ts';
+import { createPoolKeys, LiquidityStateV4JSON, logger, zip, setDifference } from './helpers/index.ts';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor.ts';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor.ts';
 
@@ -38,9 +38,9 @@ export interface MintAccount {
 }
 
 export interface TokenAccount {
-	address: PublicKey;
-	mint: PublicKey;
-	owner: PublicKey;
+	address: string;
+	mint: string;
+	owner: string;
 	tokenAmount: {
 		amount: string;
 		decimals: number;
@@ -99,6 +99,20 @@ function safeFractionToFixed(fraction: Price|CurrencyAmount|Percent): string {
 	}
 }
 
+function bigintToDecimal(x: bigint, decimals: number): string {
+	let y = x.toString();
+	let numLength = y.length;
+	if (x < 0) numLength--;
+	if (decimals >= numLength) {
+		const sign = x < 0? '-' : '';
+		if (x < 0) y = y.slice(1);
+		const zeros = '0'.repeat(decimals - numLength);
+		return `${sign}0.${zeros}${y}`;
+	}
+	const decPointIndex = y.length - decimals;
+	return `${y.slice(0, decPointIndex)}.${y.slice(decPointIndex)}`;
+}
+
 type BalanceMap = { [key: string]: { [key: string]: bigint } };
 
 function getBalanceChanges(preMap: BalanceMap, postMap: BalanceMap) {
@@ -125,18 +139,51 @@ function getBalanceChanges(preMap: BalanceMap, postMap: BalanceMap) {
 	return result;
 }
 
-function bigintToDecimal(x: bigint, decimals: number) {
-	let y = x.toString();
-	let numLength = y.length;
-	if (x < 0) numLength--;
-	if (decimals >= numLength) {
-		const sign = x < 0? '-' : '';
-		if (x < 0) y = y.slice(1);
-		const zeros = '0'.repeat(decimals - numLength);
-		return `${sign}0.${zeros}${y}`;
-	}
-	const decPointIndex = y.length - decimals;
-	return `${y.slice(0, decPointIndex)}.${y.slice(decPointIndex)}`;
+export type TransformedTransaction = {
+	signature: string;
+	balanceChanges: { [key: string]: string };
+	bigintBalanceChanges: { [key: string]: string };
+};
+
+function transformTransactions(txsWithMeta: ParsedTransactionWithMeta[], mint: string, owner: string): TransformedTransaction[] {
+	return txsWithMeta
+		.map((txWithMeta) => {
+			const tx = txWithMeta!.transaction;
+			const meta = txWithMeta!.meta!;
+
+			const tokenDecimals = {} as { [key: string]: number };
+			const createMap = (arr: TokenBalance[]) => {
+				const map = {} as BalanceMap;
+				for (const { mint, owner, uiTokenAmount } of arr) {
+					if (!owner) continue;
+					map[owner] = map[owner] ?? {};
+					map[owner][mint] = BigInt(uiTokenAmount.amount);
+					tokenDecimals[mint] = uiTokenAmount.decimals;
+				}
+				return map;
+			};
+
+			if (!meta.preTokenBalances || !meta.postTokenBalances) {
+				return { signature: tx.signatures[0], balanceChanges: {}, bigintBalanceChanges: {} };
+			}
+
+			const preMap = createMap(meta.preTokenBalances);
+			const postMap = createMap(meta.postTokenBalances);
+			const ownerBalanceChanges = getBalanceChanges(preMap, postMap)[owner] ?? {};
+			const jsonOwnerBalanceChanges = Object.fromEntries(Object.entries(ownerBalanceChanges).map(
+				([ mint, balance ]) => [ mint, bigintToDecimal(balance, tokenDecimals[mint]) ]
+			));
+			const jsonBigintOwnerBalanceChanges = Object.fromEntries(Object.entries(ownerBalanceChanges).map(
+				([ mint, balance ]) => [ mint, balance.toString() ]
+			));
+
+			return {
+				signature: tx.signatures[0],
+				balanceChanges: jsonOwnerBalanceChanges,
+				bigintBalanceChanges: jsonBigintOwnerBalanceChanges,
+			};
+		})
+		.filter(({ balanceChanges }) => mint in balanceChanges);
 }
 
 async function confirmedTxSignaturesForAccount(connection: Connection, accountAddress: PublicKey) {
@@ -303,10 +350,50 @@ export class Wallet {
 		));
 	}
 
+	async getMultipleTokenSellExecutionInfo(rawMintAddresses: string[], rawAmountsToSell: string[]): Promise<SwapExecutionInfoJSON[]> {
+		const mints = rawMintAddresses.map((rawMintAddress) => new PublicKey(rawMintAddress));
+		const poolsDatas = await this.poolStorage.getMultiple(rawMintAddresses);
+		const marketIds = poolsDatas.map(({ state: { marketId } }) => marketId);
+		const markets = await this.marketStorage.getMultiple(marketIds);
+		const poolsKeys = zip(poolsDatas, markets).map(
+			([ { id, state }, market ]) => createPoolKeys(new PublicKey(id), state, market)
+		);
+		const poolsInfos = await Liquidity.fetchMultipleInfo({
+			connection: this.connection,
+			pools: poolsKeys,
+		});
+		logger.debug(`Fetched multiple infos ${poolsInfos.length}`);
+		const slippagePercent = new Percent(this.config.sellSlippage, 100);
+		const tokensToSell = zip(mints, poolsDatas).map(
+			([ mint, poolData ]) => new Token(TOKEN_PROGRAM_ID, mint, Number(poolData.state.baseDecimal))
+		);
+		const amountsIn = zip(tokensToSell, rawAmountsToSell).map(
+			([ tokenToSell, rawAmountToSell ]) => new TokenAmount(tokenToSell, BigInt(rawAmountToSell), true)
+		);
+		const resps = zip(poolsKeys, poolsInfos, amountsIn).map(
+			([ poolKeys, poolInfo, amountIn ]) => Liquidity.computeAmountOut({
+				poolKeys,
+				poolInfo,
+				amountIn,
+				currencyOut: this.config.quoteToken,
+				slippage: slippagePercent,
+			})
+		);
+		return resps.map(
+			({ amountOut, minAmountOut, currentPrice, executionPrice, fee }) => ({
+				amountOut: safeFractionToFixed(amountOut),
+				minAmountOut: safeFractionToFixed(minAmountOut),
+				currentPrice: safeFractionToFixed(currentPrice),
+				executionPrice: executionPrice? safeFractionToFixed(executionPrice): null,
+				fee: safeFractionToFixed(fee),
+			})
+		);
+	}
+
 	async getTokenSellExecutionInfo(rawMintAddress: string, rawAmountToSell: string): Promise<SwapExecutionInfoJSON> {
 		const mint = new PublicKey(rawMintAddress);
-		const poolData = await this.poolStorage.get(mint.toString());
-		const market = await this.marketStorage.get(poolData.state.marketId.toString());
+		const poolData = await this.poolStorage.get(rawMintAddress);
+		const market = await this.marketStorage.get(poolData.state.marketId);
 		const poolKeys = createPoolKeys(new PublicKey(poolData.id), poolData.state, market);
 		const poolInfo = await Liquidity.fetchInfo({
 			connection: this.connection,
@@ -331,15 +418,34 @@ export class Wallet {
 		};
 	}
 
+	private getAtaTransactionsFromStorage(ata: PublicKey): ParsedTransactionWithMeta[] {
+		if (!this.walletTxs) {
+			throw new Error(`Cannot get transaction for ata ${ata}, because no transactions were fetched for the storage`);
+		}
+		return this.walletTxs.filter(
+			(txWithMeta) => txWithMeta.transaction.message.accountKeys.map(({ pubkey }) => pubkey.toString()).includes(ata.toString())
+		);
+	}
+
 	private async getAtaTransactions(ata: PublicKey): Promise<ParsedTransactionWithMeta[]> {
 		if (this.walletTxs) {
-			return this.walletTxs.filter(
-				(txWithMeta) => txWithMeta.transaction.message.accountKeys.map(({ pubkey }) => pubkey.toString()).includes(ata.toString())
-			);
+			return this.getAtaTransactionsFromStorage(ata);
 		}
 		const connection = this.privateConnection ?? this.connection;
 		const confirmedSignatures = await confirmedTxSignaturesForAccount(connection, ata);
 		return await transactionsWithMetaFromSignatures(connection, confirmedSignatures);
+	}
+
+	async getMultipleAtaBuyAndSellTransactions(rawMintAddresses: string[], rawAtaAddresses: string[]) {
+		const mints = rawMintAddresses.map((rawMintAddress) => new PublicKey(rawMintAddress));
+		const atas = rawAtaAddresses.map((rawAtaAddress) => new PublicKey(rawAtaAddress));
+
+		const owner = this.config.account.publicKey;
+
+		return zip(mints, atas).map(([ mint, ata ]) => {
+			const txsWithMeta = this.getAtaTransactionsFromStorage(ata);
+			return transformTransactions(txsWithMeta, mint.toString(), owner.toString());
+		});
 	}
 
 	async getAtaBuyAndSellTransactions(rawMintAddress: string, rawAtaAddress: string) {
@@ -350,42 +456,7 @@ export class Wallet {
 		const rawOwnerAddress = owner.toString();
 
 		const txsWithMeta = await this.getAtaTransactions(ata);
-
-		const relevantTransactions = txsWithMeta
-			.map((txWithMeta) => {
-				const tx = txWithMeta!.transaction;
-				const meta = txWithMeta!.meta!;
-
-				const tokenDecimals = {} as { [key: string]: number };
-				const createMap = (arr: TokenBalance[]) => {
-					const map = {} as BalanceMap;
-					for (const { mint, owner, uiTokenAmount } of arr) {
-						if (!owner) continue;
-						map[owner] = map[owner] ?? {};
-						map[owner][mint] = BigInt(uiTokenAmount.amount);
-						tokenDecimals[mint] = uiTokenAmount.decimals;
-					}
-					return map;
-				};
-
-				if (!meta.preTokenBalances || !meta.postTokenBalances) {
-					return { signature: tx.signatures[0], balanceChanges: {} };
-				}
-
-				const preMap = createMap(meta.preTokenBalances);
-				const postMap = createMap(meta.postTokenBalances);
-				const ownerBalanceChanges = getBalanceChanges(preMap, postMap)[rawOwnerAddress];
-				const jsonOwnerBalanceChanges = Object.fromEntries(Object.entries(ownerBalanceChanges).map(
-					([ mint, balance ]) => [ mint, bigintToDecimal(balance, tokenDecimals[mint]) ]
-				));
-
-				return {
-					signature: tx.signatures[0],
-					balanceChanges: jsonOwnerBalanceChanges,
-				};
-			})
-			.filter(({ balanceChanges }) => rawMintAddress in balanceChanges);
-		return relevantTransactions;
+		return transformTransactions(txsWithMeta, rawMintAddress, rawOwnerAddress);
 	}
 }
 //TODO: cache all account transactions in a database

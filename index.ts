@@ -257,10 +257,7 @@ const runListener = async () => {
 		const exists = await poolCache.get(poolState.baseMint.toString());
 
 		if (!exists && poolOpenTime > runTimestamp) {
-			const serializedPoolState = JSON.parse(JSON.stringify(
-				poolState
-			)) as LiquidityStateV4JSON;
-			poolCache.save(updatedAccountInfo.accountId.toString(), serializedPoolState);
+			poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
 			await bot.buy(updatedAccountInfo.accountId, poolState);
 		}
 	});

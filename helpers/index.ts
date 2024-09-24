@@ -5,4 +5,3 @@ export * from './constants.ts';
 export * from './token.ts';
 export * from './wallet.ts';
 export * from './common.ts';
-export * from './graphql-solana-indexer.ts';
