@@ -14,130 +14,180 @@ import { MintAccount, TokenAccount, SwapExecutionInfoJSON } from '../../../walle
 import { TokensAuxiliaryDataContext } from '../App';
 
 const disableCacheHeaders = {
-	'Cache-Control': 'no-cache',
-	'Pragma': 'no-cache',
-	'Expires': '0',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    Expires: '0',
 };
 
 type SwapTransaction = {
-	signature: string,
-	balanceChanges: { [key: string]: string },
+    signature: string;
+    balanceChanges: { [key: string]: string };
 };
 
-export default function TokenCard({ tokenAccountData, index }: { tokenAccountData: TokenAccount, index: number }) {
-	const { mint, address, owner, tokenAmount } = tokenAccountData;
+export default function TokenCard({ tokenAccountData, index }: { tokenAccountData: TokenAccount; index: number }) {
+    const { mint, address, owner, tokenAmount } = tokenAccountData;
 
-	const [ tokensAuxiliaryDatas, setTokensAuxiliaryDatas ] = useContext(TokensAuxiliaryDataContext);
+    const [tokensAuxiliaryDatas, setTokensAuxiliaryDatas] = useContext(TokensAuxiliaryDataContext);
 
-	const [ sellExecutionInfo, setSellExecutionInfo ] = useState({} as Partial<SwapExecutionInfoJSON>);
-	const [ tokenJsonMetadata, setTokenJsonMetadata ] = useState({} as Partial<JsonMetadata>);
-	const [ buyAndSellTransactions, setBuyAndSellTransactions ] = useState([] as SwapTransaction[]);
-	const [ buyTransaction, setBuyTransaction ] = useState(null as SwapTransaction|null);
+    const [sellExecutionInfo, setSellExecutionInfo] = useState({} as Partial<SwapExecutionInfoJSON>);
+    const [tokenJsonMetadata, setTokenJsonMetadata] = useState({} as Partial<JsonMetadata>);
+    const [buyAndSellTransactions, setBuyAndSellTransactions] = useState([] as SwapTransaction[]);
+    const [buyTransaction, setBuyTransaction] = useState(null as SwapTransaction | null);
 
-	const refreshSellExecutionInfo = async () => {
-		try {
-			const { data } = await axios.get(
-				`http://localhost:8000/api/get-mint-sell-execution-info/${mint}`,
-				{
-					params: { amountToSell: tokenAmount.amount },
-					headers: disableCacheHeaders,
-				},
-			) as { data: SwapExecutionInfoJSON };
-			setSellExecutionInfo(data);
-		} catch(err: any) {
-			alert(`Fetching token sell execution info failed with: ${err.message}`);
-		}
-	};
-	const refreshBuyAndSellTransactions = async () => {
-		try {
-			const { data } = await axios.get(
-				`http://localhost:8000/api/ata-buynsell-transactions/${mint}/${address}`,
-				{ headers: disableCacheHeaders }
-			);
-			setBuyAndSellTransactions(data);
-		} catch(err: any) {
-			console.error(`Fetching buy&sell transactions failed with: ${err.message}`);
-		}
-	};
-	const sellAll = async () => {};
+    const refreshSellExecutionInfo = async () => {
+        try {
+            const { data } = (await axios.get(`http://localhost:8000/api/get-mint-sell-execution-info/${mint}`, {
+                params: { amountToSell: tokenAmount.amount },
+                headers: disableCacheHeaders,
+            })) as { data: SwapExecutionInfoJSON };
+            setSellExecutionInfo(data);
+        } catch (err: any) {
+            alert(`Fetching token sell execution info failed with: ${err.message}`);
+        }
+    };
+    const refreshBuyAndSellTransactions = async () => {
+        try {
+            const { data } = await axios.get(`http://localhost:8000/api/ata-buynsell-transactions/${mint}/${address}`, {
+                headers: disableCacheHeaders,
+            });
+            setBuyAndSellTransactions(data);
+        } catch (err: any) {
+            console.error(`Fetching buy&sell transactions failed with: ${err.message}`);
+        }
+    };
+    const sellAll = async () => {};
 
-	const { symbol, uri, isMutable, updateAuthority, tokenStandard } = tokensAuxiliaryDatas[index]?.metadata ?? {};
+    const { symbol, uri, isMutable, updateAuthority, tokenStandard } = tokensAuxiliaryDatas[index]?.metadata ?? {};
 
-	useEffect(() => {
-		setSellExecutionInfo(tokensAuxiliaryDatas[index]?.sellExecutionInfo ?? {});
-	}, [tokensAuxiliaryDatas]);
+    useEffect(() => {
+        setSellExecutionInfo(tokensAuxiliaryDatas[index]?.sellExecutionInfo ?? {});
+    }, [tokensAuxiliaryDatas]);
 
-	useEffect(() => {
-		setBuyAndSellTransactions(tokensAuxiliaryDatas[index]?.buyAndSellTransactions ?? []);
-	}, [tokensAuxiliaryDatas]);
+    useEffect(() => {
+        setBuyAndSellTransactions(tokensAuxiliaryDatas[index]?.buyAndSellTransactions ?? []);
+    }, [tokensAuxiliaryDatas]);
 
-	useEffect(() => {
-		setBuyTransaction(
-			buyAndSellTransactions.find((tx) => Number(tx.balanceChanges[mint] ?? 0) > 0) ?? null
-		);
-	}, [mint, buyAndSellTransactions])
+    useEffect(() => {
+        setBuyTransaction(buyAndSellTransactions.find((tx) => Number(tx.balanceChanges[mint] ?? 0) > 0) ?? null);
+    }, [mint, buyAndSellTransactions]);
 
-	useEffect(() => {
-		if (!uri) return;
-		axios.get(`http://localhost:8000/proxy/json`, { params: { url: uri } }).then(({ data }) => {
-			setTokenJsonMetadata(data);
-		}).catch((err) => {
-			console.error(`Fetching digital asset metadata failed with: ${err.message}`);
-		});
-	}, [uri]);
+    useEffect(() => {
+        if (!uri) return;
+        axios
+            .get(`http://localhost:8000/proxy/json`, { params: { url: uri } })
+            .then(({ data }) => {
+                setTokenJsonMetadata(data);
+            })
+            .catch((err) => {
+                console.error(`Fetching digital asset metadata failed with: ${err.message}`);
+            });
+    }, [uri]);
 
-  return (
-    <Card sx={{ maxWidth: 360 }}>
-      <CardActionArea>
-        <CardContent>
-		<CardMedia
-          component="img"
-          height="280"
-          image={tokenJsonMetadata.image}
-          alt="token logo"
-        />
-          <Typography gutterBottom variant="h5" component="div">
-			  <>{symbol}</>
-		  </Typography>
-			<>
-				Held amount: {tokenAmount.uiAmountString}
-				<br/>
-				Buy transaction:<br/>
-				{buyTransaction? `${buyTransaction.balanceChanges[mint.toString()]} ${symbol}` : 'N/A'}<br/>
-				{buyTransaction? `${buyTransaction.balanceChanges['So11111111111111111111111111111111111111112']} WSOL` : 'N/A'}<br/>
-				<a href={buyTransaction? `https://solscan.io/tx/${buyTransaction.signature}` : 'N/A'} target="_blank" rel="noreferrer">View on Solscan</a><br/>
-				Price: {sellExecutionInfo.currentPrice ?? 'N/A'}<br/>
-			</>
-          {/* <Typography variant="body2" color="text.secondary"> */}
-			  {/* <>Mint: {mint}</> */}
-		  {/* </Typography> */}
-          {/* <Typography variant="body2" color="text.secondary"> */}
-			  {/* <>Associated Token Address (ATA): {address}</> */}
-          {/* </Typography> */}
-        </CardContent>
-      </CardActionArea>
-      <CardActions>
-		  <table>
-			  <tbody>
-				  <tr>
-					  <td><Button size="small" color="primary"><a className="buttonlink" href={`https://solscan.io/token/${mint}`} target="_blank" rel="noreferrer">View Mint on Solscan</a></Button></td>
-					  <td><Button size="small" color="primary"><a className="buttonlink" href={`https://solscan.io/account/${address}`} target="_blank" rel="noreferrer">View ATA on Solscan</a></Button></td>
-				  </tr>
-				  <tr>
-					  <td colSpan={2}><Button size="small" color="primary"><a className="buttonlink" href={`https://dexscreener.com/solana/${mint}?maker=${owner}`} target="_blank" rel="noreferrer">View Mint on DexScreener</a></Button></td>
-				  </tr>
-				  <tr>
-					  <td colSpan={2}><Button size="small" color="primary" onClick={() => refreshSellExecutionInfo()}>Refresh price</Button></td>
-				  </tr>
-				  <tr>
-					  <td colSpan={2}><Button size="small" color="primary" onClick={() => refreshBuyAndSellTransactions()}>Refresh txs</Button></td>
-				  </tr>
-				  <tr>
-					  <td colSpan={2}><Button size="medium" color="primary" onClick={() => sellAll()}>Sell all tokens and close ATA</Button></td>
-				  </tr>
-			  </tbody>
-		  </table>
-      </CardActions>
-    </Card>
-  );
+    return (
+        <Card sx={{ maxWidth: 360 }}>
+            <CardActionArea>
+                <CardContent>
+                    <CardMedia component="img" height="280" image={tokenJsonMetadata.image} alt="token logo" />
+                    <Typography gutterBottom variant="h5" component="div">
+                        <>{symbol}</>
+                    </Typography>
+                    <>
+                        Held amount: {tokenAmount.uiAmountString}
+                        <br />
+                        Buy transaction:
+                        <br />
+                        {buyTransaction ? `${buyTransaction.balanceChanges[mint.toString()]} ${symbol}` : 'N/A'}
+                        <br />
+                        {buyTransaction
+                            ? `${buyTransaction.balanceChanges['So11111111111111111111111111111111111111112']} WSOL`
+                            : 'N/A'}
+                        <br />
+                        <a
+                            href={buyTransaction ? `https://solscan.io/tx/${buyTransaction.signature}` : 'N/A'}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            View on Solscan
+                        </a>
+                        <br />
+                        Price: {sellExecutionInfo.currentPrice ?? 'N/A'}
+                        <br />
+                    </>
+                    {/* <Typography variant="body2" color="text.secondary"> */}
+                    {/* <>Mint: {mint}</> */}
+                    {/* </Typography> */}
+                    {/* <Typography variant="body2" color="text.secondary"> */}
+                    {/* <>Associated Token Address (ATA): {address}</> */}
+                    {/* </Typography> */}
+                </CardContent>
+            </CardActionArea>
+            <CardActions>
+                <table>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <Button size="small" color="primary">
+                                    <a
+                                        className="buttonlink"
+                                        href={`https://solscan.io/token/${mint}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                    >
+                                        View Mint on Solscan
+                                    </a>
+                                </Button>
+                            </td>
+                            <td>
+                                <Button size="small" color="primary">
+                                    <a
+                                        className="buttonlink"
+                                        href={`https://solscan.io/account/${address}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                    >
+                                        View ATA on Solscan
+                                    </a>
+                                </Button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colSpan={2}>
+                                <Button size="small" color="primary">
+                                    <a
+                                        className="buttonlink"
+                                        href={`https://dexscreener.com/solana/${mint}?maker=${owner}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                    >
+                                        View Mint on DexScreener
+                                    </a>
+                                </Button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colSpan={2}>
+                                <Button size="small" color="primary" onClick={() => refreshSellExecutionInfo()}>
+                                    Refresh price
+                                </Button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colSpan={2}>
+                                <Button size="small" color="primary" onClick={() => refreshBuyAndSellTransactions()}>
+                                    Refresh txs
+                                </Button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colSpan={2}>
+                                <Button size="medium" color="primary" onClick={() => sellAll()}>
+                                    Sell all tokens and close ATA
+                                </Button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </CardActions>
+        </Card>
+    );
 }
