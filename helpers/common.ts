@@ -29,3 +29,17 @@ export class Deferred {
 }
 
 export const fillArrayFromCallback = (length: number, callback: Function) => new Array(length).fill(0).map(callback());
+
+export function bigintToDecimal(x: bigint, decimals: number): string {
+    let y = x.toString();
+    let numLength = y.length;
+    if (x < 0) numLength--;
+    if (decimals >= numLength) {
+        const sign = x < 0 ? '-' : '';
+        if (x < 0) y = y.slice(1);
+        const zeros = '0'.repeat(decimals - numLength);
+        return `${sign}0.${zeros}${y}`;
+    }
+    const decPointIndex = y.length - decimals;
+    return `${y.slice(0, decPointIndex)}.${y.slice(decPointIndex)}`;
+}

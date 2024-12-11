@@ -6,12 +6,13 @@ import TokenCard from './components/TokenCard';
 import './App.css';
 
 import { MetadataAccountData } from '@metaplex-foundation/mpl-token-metadata';
-import { TokenAccount, SwapExecutionInfoJSON, TransformedTransaction } from '../../wallet';
-import { range, zip } from '../../helpers/common';
+import { SwapExecutionInfoJSON } from '../../wallet';
+import { TokenAccount, TransformedTransaction } from '../../helpers/blockchain-operations';
+import { zip } from '../../helpers/common';
 
 type TokenAuxiliaryData = {
     metadata: MetadataAccountData;
-    sellExecutionInfo: SwapExecutionInfoJSON;
+    swapExecutionInfo: SwapExecutionInfoJSON;
     buyAndSellTransactions: TransformedTransaction[];
 };
 
@@ -30,30 +31,28 @@ function App() {
         if (!tokens.length) return;
         const mints = tokens.map(({ mint }) => mint);
         const atas = tokens.map(({ address }) => address);
-        const { data: buyAndSellTransactions } = await axios.get(
+        const { data: buyAndSellTransactions } = await axios.post(
             `http://localhost:8000/api/get-mints-buynsell-transactions`,
-            { params: { mints, atas } },
+            { mints, atas },
         );
-        const { data: metadatas } = await axios.get(`http://localhost:8000/api/get-mints-metadatas`, {
-            params: { mints },
-        });
+        const { data: metadatas } = await axios.post(`http://localhost:8000/api/get-mints-metadatas`, { mints });
+        // I think below code didn't work for some reason, even though it is faster
         // const [{ data: buyAndSellTransactions }, { data: metadatas }] = await Promise.all(zip([
         // 	axios.get(
         // 		`http://localhost:8000/api/get-mints-buynsell-transactions`,
-        // 		{ params: { mints, atas } }
+        // 		{ mints, atas },
         // 	).then((asd) => {
         // 		console.log(asd);
         // 		return asd;
         // 	}),
-        // 	axios.get(
-        // 		`http://localhost:8000/api/get-mints-metadatas`,
-        // 		{ params: { mints } }
+        // 	axios.post(
+        // 		`http://localhost:8000/api/get-mints-metadatas`, { mints }
         // 	).then((asd) => {
         // 		console.log(asd);
         // 		return asd;
         // 	})
         // ], ['sell transaction execution infos', 'metadatas']).map(([ promise, resourceName ]) => promise.catch((err) => {
-        // 	alert(`Error getting ${resourceName} of tokens on server: ${err}`);
+        // 	alert(`Error getting ${resourceName} of openTokens on server: ${err}`);
         // 	return { data: [] };
         // })));
         const totalBalances = zip(buyAndSellTransactions as TransformedTransaction[][], mints as string[]).map(
@@ -69,30 +68,61 @@ function App() {
                 return { uiBalance, rawBalance };
             },
         );
+        type Balance = { uiBalance: number; rawBalance: bigint };
+
         const WSOL_Index = mints.indexOf(WSOL);
-        const mintsWithoutWSOL = mints.filter((_, i) => i !== WSOL_Index);
-        const amountsToSell = totalBalances
-            .filter((_, i) => i !== WSOL_Index)
-            .map(({ rawBalance }) => rawBalance.toString());
-        const { data: sellExecutionInfos } = await axios.get(
+
+        const openTokensWithBalances = zip(tokens, totalBalances)
+            .map(([token, balance], idx) => [token, balance, idx] as [TokenAccount, Balance, number])
+            .filter(([token, _, idx]) => !token.closed && idx !== WSOL_Index);
+        const openTokensMints = openTokensWithBalances.map(([{ mint }]) => mint);
+        const openTokensBalances = openTokensWithBalances.map(([, { rawBalance }]) => rawBalance.toString());
+        const openTokensIdxs = openTokensWithBalances.map(([, , idx]) => idx);
+        const { data: sellExecutionInfos } = await axios.post(
             `http://localhost:8000/api/get-mints-sell-execution-infos`,
-            { params: { mints: mintsWithoutWSOL, amountsToSell } },
+            { mints: openTokensMints, amountsToSell: openTokensBalances },
         );
+
+        const closedTokensWithBalances = zip(tokens, totalBalances)
+            .map(([token, balance], idx) => [token, balance, idx] as [TokenAccount, Balance, number])
+            .filter(([token, _, idx]) => token.closed && idx !== WSOL_Index);
+        const closedTokensMints = closedTokensWithBalances.map(([{ mint }]) => mint);
+        const closedTokensBalances = closedTokensWithBalances.map(([, { rawBalance }]) => rawBalance.toString());
+        const closedTokensIdxs = closedTokensWithBalances.map(([, , idx]) => idx);
+        const { data: buyExecutionInfos } = await axios.post(
+            `http://localhost:8000/api/get-mints-buy-execution-infos`,
+            { mints: closedTokensMints, amountsToBuy: closedTokensBalances },
+        );
+        // setTokensAuxiliaryDatas(
+        //     zip(
+        //         buyAndSellTransactions as TransformedTransaction[][],
+        //         metadatas as MetadataAccountData[],
+        //         sellExecutionInfos as SwapExecutionInfoJSON[],
+        //     ).map(([buyAndSellTransactions, metadata, sellExecutionInfo]) => ({
+        //         buyAndSellTransactions,
+        //         metadata,
+        //         sellExecutionInfo,
+        //     })),
+        // );
         setTokensAuxiliaryDatas(
-            zip(
-                buyAndSellTransactions as TransformedTransaction[][],
-                metadatas as MetadataAccountData[],
-                sellExecutionInfos as SwapExecutionInfoJSON[],
-            ).map(([buyAndSellTransactions, metadata, sellExecutionInfo]) => ({
-                buyAndSellTransactions,
-                metadata,
-                sellExecutionInfo,
-            })),
+            zip(openTokensIdxs, sellExecutionInfos)
+                .map(([idx, sellExecutionInfo]) => ({
+                    buyAndSellTransactions: buyAndSellTransactions[idx] as TransformedTransaction[],
+                    metadata: metadatas[idx] as MetadataAccountData,
+                    swapExecutionInfo: sellExecutionInfo as SwapExecutionInfoJSON,
+                }))
+                .concat(
+                    zip(closedTokensIdxs, buyExecutionInfos).map(([idx, buyExecutionInfo]) => ({
+                        buyAndSellTransactions: buyAndSellTransactions[idx] as TransformedTransaction[],
+                        metadata: metadatas[idx] as MetadataAccountData,
+                        swapExecutionInfo: buyExecutionInfo as SwapExecutionInfoJSON,
+                    })),
+                ),
         );
     };
 
     useEffect(() => {
-        axios.get('http://localhost:8000/api/spl-token-accounts').then(({ data }: { data: TokenAccount[] }) => {
+        axios.get('http://localhost:8000/api/all-spl-token-accounts').then(({ data }: { data: TokenAccount[] }) => {
             setTokens(data.filter(({ mint }) => ![WSOL].includes(mint.toString())));
         });
     }, []);

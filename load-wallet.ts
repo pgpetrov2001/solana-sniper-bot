@@ -1,4 +1,4 @@
-import { Connection, KeyedAccountInfo, Keypair } from '@solana/web3.js';
+import { Connection, KeyedAccountInfo } from '@solana/web3.js';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { MARKET_STATE_LAYOUT_V3, TokenAmount } from '@raydium-io/raydium-sdk';
 import { GraphQLClient } from 'graphql-request';
@@ -7,7 +7,6 @@ import {
     getToken,
     getWallet,
     logger,
-    sleep,
     COMMITMENT_LEVEL,
     RPC_ENDPOINT,
     RPC_WEBSOCKET_ENDPOINT,
@@ -32,6 +31,8 @@ import {
     SELL_SKIP_PREFLIGHT,
     DISABLE_RETRY_ON_RATE_LIMIT,
     SHYFT_GRAPHQL_API_URL,
+    BUY_SKIP_PREFLIGHT,
+    BUY_SLIPPAGE,
 } from './helpers/index.ts';
 import { MarketCache, PoolCache } from './cache/index.ts';
 import { Listeners } from './listeners/index.ts';
@@ -92,7 +93,7 @@ switch (TRANSACTION_EXECUTOR) {
 }
 
 const wallet_account = getWallet(PRIVATE_KEY.trim());
-const walletConfig = <WalletConfig>{
+const walletConfig: WalletConfig = {
     account: wallet_account,
     quoteAta: getAssociatedTokenAddressSync(quoteToken.mint, wallet_account.publicKey),
     quoteToken,
@@ -105,7 +106,9 @@ const walletConfig = <WalletConfig>{
     takeProfit: TAKE_PROFIT,
     stopLoss: STOP_LOSS,
     sellSlippage: SELL_SLIPPAGE,
+    buySlippage: BUY_SLIPPAGE,
     sellSkipPreflight: SELL_SKIP_PREFLIGHT,
+    buySkipPreflight: BUY_SKIP_PREFLIGHT,
 };
 
 export const wallet = new Wallet(connection, privateConnection, marketCache, poolCache, txExecutor, walletConfig);

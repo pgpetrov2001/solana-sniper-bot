@@ -1,52 +1,46 @@
 import {
     Connection,
     Keypair,
-    AccountInfo,
-    TransactionResponse,
-    ParsedAccountData,
     ParsedTransactionWithMeta,
-    TokenBalance,
     PublicKey,
+    ComputeBudgetProgram,
+    TransactionMessage,
+    VersionedTransaction,
 } from '@solana/web3.js';
-import { getAccount, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import {
-    MAINNET_PROGRAM_ID,
+    AccountLayout,
+    createAssociatedTokenAccountIdempotentInstruction,
+    createCloseAccountInstruction,
+    getAccount,
+    getAssociatedTokenAddressSync,
+    TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
+import {
     Liquidity,
     LiquidityPoolKeysV4,
     getPdaMetadataKey,
     Percent,
     Token,
     TokenAmount,
-    CurrencyAmount,
-    Price,
+    LiquidityPoolInfo,
 } from '@raydium-io/raydium-sdk';
-import {
-    mplTokenMetadata,
-    getMetadataAccountDataSerializer,
-    MetadataAccountData,
-    MetadataAccountDataArgs,
-} from '@metaplex-foundation/mpl-token-metadata';
+import { getMetadataAccountDataSerializer, MetadataAccountData } from '@metaplex-foundation/mpl-token-metadata';
 
 import { redisClient } from './db.ts';
-import { MarketCache, PoolCache, SnipeListCache, SavedPool } from './cache/index.ts';
+import { MarketCache, PoolCache, SavedPool } from './cache/index.ts';
 import { TransactionExecutor } from './transactions/index.ts';
-import { createPoolKeys, LiquidityStateV4JSON, logger, zip, setDifference } from './helpers/index.ts';
+import { createPoolKeys, logger, zip, NETWORK } from './helpers/index.ts';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor.ts';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor.ts';
+import {
+    confirmedTxSignaturesForAccount,
+    getParsedTokenAccountsByOwner,
+    safeFractionToFixed,
+    TokenAccount,
+    transformTransactions,
+} from './helpers/blockchain-operations.ts';
 
 export interface MintAccount {}
-
-export interface TokenAccount {
-    address: string;
-    mint: string;
-    owner: string;
-    tokenAmount: {
-        amount: string;
-        decimals: number;
-        uiAmount: number;
-        uiAmountString: string;
-    };
-}
 
 export interface WalletConfig {
     account: Keypair;
@@ -61,146 +55,27 @@ export interface WalletConfig {
     takeProfit: number;
     stopLoss: number;
     sellSlippage: number;
+    buySlippage: number;
     sellSkipPreflight: boolean;
+    buySkipPreflight: boolean;
 }
 
-export type SwapExecutionInfo =
-    | {
-          amountOut: CurrencyAmount;
-          minAmountOut: CurrencyAmount;
-          currentPrice: Price;
-          executionPrice: Price | null;
-          priceImpact: Percent;
-          fee: CurrencyAmount;
-      }
-    | {
-          amountOut: TokenAmount;
-          minAmountOut: TokenAmount;
-          currentPrice: Price;
-          executionPrice: Price | null;
-          priceImpact: Percent;
-          fee: CurrencyAmount;
-      };
-
-export interface SwapExecutionInfoJSON {
+export type SellExecutionInfoJSON = {
     amountOut: string;
     minAmountOut: string;
     currentPrice: string;
     executionPrice: string | null;
     fee: string; // fee is in the input currency
-}
-
-function safeFractionToFixed(fraction: Price | CurrencyAmount | Percent): string {
-    try {
-        return fraction.toFixed();
-    } catch (err: any) {
-        return '0';
-    }
-}
-
-function bigintToDecimal(x: bigint, decimals: number): string {
-    let y = x.toString();
-    let numLength = y.length;
-    if (x < 0) numLength--;
-    if (decimals >= numLength) {
-        const sign = x < 0 ? '-' : '';
-        if (x < 0) y = y.slice(1);
-        const zeros = '0'.repeat(decimals - numLength);
-        return `${sign}0.${zeros}${y}`;
-    }
-    const decPointIndex = y.length - decimals;
-    return `${y.slice(0, decPointIndex)}.${y.slice(decPointIndex)}`;
-}
-
-type BalanceMap = { [key: string]: { [key: string]: bigint } };
-
-function getBalanceChanges(preMap: BalanceMap, postMap: BalanceMap) {
-    const allOwners = Object.keys(preMap).concat(Object.keys(postMap));
-    const allMints = Object.values(preMap)
-        .concat(Object.values(postMap))
-        .reduce((result, mintMap) => result.concat(Object.keys(mintMap)), [] as string[]);
-
-    const result = {} as BalanceMap;
-
-    for (const owner of allOwners) {
-        result[owner] = result[owner] ?? {};
-        for (const mint of allMints) {
-            const pre = preMap[owner]?.[mint] ?? BigInt(0);
-            const post = postMap[owner]?.[mint] ?? BigInt(0);
-            if (pre !== post) {
-                result[owner][mint] = post - pre;
-            }
-        }
-    }
-
-    return result;
-}
-
-export type TransformedTransaction = {
-    signature: string;
-    balanceChanges: { [key: string]: string };
-    bigintBalanceChanges: { [key: string]: string };
 };
 
-function transformTransactions(
-    txsWithMeta: ParsedTransactionWithMeta[],
-    mint: string,
-    owner: string,
-): TransformedTransaction[] {
-    return txsWithMeta
-        .map((txWithMeta) => {
-            const tx = txWithMeta!.transaction;
-            const meta = txWithMeta!.meta!;
+export type BuyExecutionInfoJSON = {
+    amountIn: string;
+    maxAmountIn: string;
+    currentPrice: string;
+    executionPrice: string | null;
+};
 
-            const tokenDecimals = {} as { [key: string]: number };
-            const createMap = (arr: TokenBalance[]) => {
-                const map = {} as BalanceMap;
-                for (const { mint, owner, uiTokenAmount } of arr) {
-                    if (!owner) continue;
-                    map[owner] = map[owner] ?? {};
-                    map[owner][mint] = BigInt(uiTokenAmount.amount);
-                    tokenDecimals[mint] = uiTokenAmount.decimals;
-                }
-                return map;
-            };
-
-            if (!meta.preTokenBalances || !meta.postTokenBalances) {
-                return { signature: tx.signatures[0], balanceChanges: {}, bigintBalanceChanges: {} };
-            }
-
-            const preMap = createMap(meta.preTokenBalances);
-            const postMap = createMap(meta.postTokenBalances);
-            const ownerBalanceChanges = getBalanceChanges(preMap, postMap)[owner] ?? {};
-            const jsonOwnerBalanceChanges = Object.fromEntries(
-                Object.entries(ownerBalanceChanges).map(([mint, balance]) => [
-                    mint,
-                    bigintToDecimal(balance, tokenDecimals[mint]),
-                ]),
-            );
-            const jsonBigintOwnerBalanceChanges = Object.fromEntries(
-                Object.entries(ownerBalanceChanges).map(([mint, balance]) => [mint, balance.toString()]),
-            );
-
-            return {
-                signature: tx.signatures[0],
-                balanceChanges: jsonOwnerBalanceChanges,
-                bigintBalanceChanges: jsonBigintOwnerBalanceChanges,
-            };
-        })
-        .filter(({ balanceChanges }) => mint in balanceChanges);
-}
-
-async function confirmedTxSignaturesForAccount(connection: Connection, accountAddress: PublicKey) {
-    const signatureInfos = await connection.getSignaturesForAddress(accountAddress);
-    return signatureInfos
-        .filter(
-            (signatureInfo) =>
-                signatureInfo.err == null &&
-                signatureInfo.confirmationStatus &&
-                ['confirmed', 'finalized'].includes(signatureInfo.confirmationStatus),
-        )
-        .map(({ signature }) => signature);
-}
+export type SwapExecutionInfoJSON = SellExecutionInfoJSON | BuyExecutionInfoJSON;
 
 function txSignatureDatabaseKey(signature: string) {
     return `tx-signature/${signature}`;
@@ -210,31 +85,47 @@ async function transactionsWithMetaFromSignatures(
     connection: Connection,
     signatures: string[],
 ): Promise<ParsedTransactionWithMeta[]> {
-    const txsWithMeta = [];
+    let txsWithMeta: Record<string, ParsedTransactionWithMeta> = {};
+    const idxOfSig: Record<string, number> = {};
     const unfetchedSignatures = [];
+    let idx = 0;
     for (const sig of signatures) {
+        idxOfSig[sig] = idx++;
         const val = await redisClient.get(txSignatureDatabaseKey(sig));
         if (val) {
-            txsWithMeta.push(JSON.parse(val) as ParsedTransactionWithMeta);
+            txsWithMeta[sig] = JSON.parse(val) as ParsedTransactionWithMeta;
         } else {
             unfetchedSignatures.push(sig);
         }
     }
     if (unfetchedSignatures.length) {
         logger.debug(`Fetching transactions with metadata for ${unfetchedSignatures.length} signatures`);
+
         const resp = await connection.getParsedTransactions(unfetchedSignatures, { maxSupportedTransactionVersion: 0 });
-        logger.debug(`Fetched null result for ${resp.filter((t) => !t).length} signatures.`);
+        const parsedTxs: ParsedTransactionWithMeta[] = resp.filter(
+            (tx) => tx && tx.meta,
+        ) as ParsedTransactionWithMeta[];
+        if (parsedTxs.length < resp.length) {
+            const msg = `${resp.length - parsedTxs.length} transactions had no metadata in the response from getParsedTransactions`;
+            logger.error(msg);
+            throw new Error(msg);
+        }
+        // save fetched results in redis
         await Promise.all(
-            resp.map(async (txWithMeta) => {
-                if (txWithMeta) {
-                    const signature = txWithMeta.transaction.signatures[0];
-                    await redisClient.set(txSignatureDatabaseKey(signature), JSON.stringify(txWithMeta));
-                }
+            parsedTxs.map(async (txWithMeta) => {
+                const signature = txWithMeta.transaction.signatures[0];
+                await redisClient.set(txSignatureDatabaseKey(signature), JSON.stringify(txWithMeta));
             }),
         );
-        txsWithMeta.push(...resp);
+        txsWithMeta = {
+            ...txsWithMeta,
+            ...Object.fromEntries(parsedTxs.map((txWithMeta) => [txWithMeta.transaction.signatures[0], txWithMeta])),
+        };
     }
-    return txsWithMeta.filter((txWithMeta) => txWithMeta && txWithMeta.meta) as ParsedTransactionWithMeta[];
+    // preserve original order in signatures parameter
+    return Object.entries(txsWithMeta)
+        .sort(([siga], [sigb]) => idxOfSig[siga] - idxOfSig[sigb])
+        .map(([, txWithMeta]) => txWithMeta);
 }
 
 export class Wallet {
@@ -259,7 +150,7 @@ export class Wallet {
     async init() {
         try {
             await getAccount(this.connection, this.config.quoteAta, this.connection.commitment);
-        } catch (err: any) {
+        } catch (err: unknown) {
             throw new Error(
                 `Could not verify whether ${this.config.quoteToken.symbol} token account is present in wallet ${this.config.account.publicKey.toString()} due to error: ${err}`,
             );
@@ -269,7 +160,7 @@ export class Wallet {
                 console.time('Fetching transaction signatures');
                 await this.fetchWalletTxSigs();
                 console.timeEnd('Fetching transaction signatures');
-            } catch (err: any) {
+            } catch (err: unknown) {
                 logger.error(
                     {
                         wallet: this.config.account.publicKey,
@@ -282,7 +173,7 @@ export class Wallet {
                 console.time('Fetching transactions with metas');
                 await this.fetchWalletTxMetas();
                 console.timeEnd('Fetching transactions with metas');
-            } catch (err: any) {
+            } catch (err: unknown) {
                 logger.error(
                     {
                         wallet: this.config.account.publicKey,
@@ -337,17 +228,21 @@ export class Wallet {
     }
 
     async getMintsMetadata(rawMintAddresses: string[]): Promise<MetadataAccountData[]> {
-        const mints = rawMintAddresses.map((rawMintAddress) => new PublicKey(rawMintAddress));
-        const metadataPDAs = mints.map((mint) => getPdaMetadataKey(mint).publicKey);
-        const metadataAccounts = await this.connection.getMultipleAccountsInfo(metadataPDAs);
-        if (metadataAccounts.find((x) => !x)) {
-            throw new Error(`Failed to fetch metadata account data for at least one mint address`);
+        const allResults: MetadataAccountData[] = [];
+        for (let i = 0; i < rawMintAddresses.length; i += 100) {
+            const mints = rawMintAddresses.slice(i, i + 100).map((rawMintAddress) => new PublicKey(rawMintAddress));
+            const metadataPDAs = mints.map((mint) => getPdaMetadataKey(mint).publicKey);
+            const metadataAccounts = await this.connection.getMultipleAccountsInfo(metadataPDAs);
+            if (metadataAccounts.find((x) => !x)) {
+                throw new Error(`Failed to fetch metadata account data for at least one mint address`);
+            }
+            const metadataAccountsData = metadataAccounts.map((metadataAccount) => {
+                const [metadataAccountData] = this.metadataSerializer.deserialize(metadataAccount!.data);
+                return metadataAccountData;
+            });
+            allResults.push(...metadataAccountsData);
         }
-        const metadataAccountsData = metadataAccounts.map((metadataAccount) => {
-            const [metadataAccountData] = this.metadataSerializer.deserialize(metadataAccount!.data);
-            return metadataAccountData;
-        });
-        return metadataAccountsData;
+        return allResults;
     }
 
     async getAndCacheMintsPools(rawMintAddresses: string[]): Promise<SavedPool[]> {
@@ -355,27 +250,75 @@ export class Wallet {
     }
 
     async getTokenAccounts(): Promise<TokenAccount[]> {
-        const { value: resp } = await this.connection.getParsedTokenAccountsByOwner(this.config.account.publicKey, {
-            programId: TOKEN_PROGRAM_ID,
-        });
-        const accounts = await Promise.all(
-            resp.map(async ({ account, pubkey }: { account: AccountInfo<ParsedAccountData>; pubkey: PublicKey }) => {
-                const accountData = account.data.parsed.info;
-                return {
-                    address: pubkey,
-                    ...accountData,
-                };
-            }),
-        );
-        return JSON.parse(
-            JSON.stringify(accounts, (key, value) => (typeof value === 'bigint' ? value.toString() : value)),
-        );
+        return getParsedTokenAccountsByOwner(this.connection, this.config.account.publicKey);
     }
 
-    async getMultipleTokenSellExecutionInfo(
+    async getAllTokenAccounts(): Promise<TokenAccount[]> {
+        if (!this.walletTxs) {
+            throw new Error(`Cannot get closed token accounts, because no transactions were fetched from the storage`);
+        }
+
+        const accounts = await this.getTokenAccounts();
+        logger.trace(`Fetched ${accounts.length} open token accounts`);
+        const openAtaKeys = accounts.map(({ address }) => address);
+        const openAtaMints = accounts.map(({ mint }) => mint);
+        const computedAtas: Record<string, string> = Object.fromEntries(zip(openAtaKeys, openAtaMints));
+
+        for (const tx of this.walletTxs) {
+            const transactedMintsPre = tx.meta?.preTokenBalances?.map((tokenBalance) => tokenBalance.mint);
+            const transactedMintsPost = tx.meta?.postTokenBalances?.map((tokenBalance) => tokenBalance.mint);
+            const transactedMints = transactedMintsPre?.concat(transactedMintsPost ?? []) ?? transactedMintsPost ?? [];
+            for (const mint of transactedMints) {
+                if (!(mint in computedAtas)) {
+                    computedAtas[mint] = getAssociatedTokenAddressSync(
+                        new PublicKey(mint),
+                        this.config.account.publicKey,
+                    ).toString();
+                    const ata = computedAtas[mint];
+                    accounts.push({
+                        closed: true,
+                        address: ata,
+                        mint,
+                        owner: this.config.account.publicKey.toString(),
+                        tokenAmount: {
+                            amount: '0',
+                            decimals: 0,
+                            uiAmount: 0,
+                            uiAmountString: '0',
+                        },
+                    });
+                }
+            }
+            // use the fact that associated token addresses for mints are listed here, to avoid calling getAssociatedTokenAddressSync too many times
+            // const participatingAccountKeys = tx.transaction.message.accountKeys.map((accountKey) => accountKey.pubkey);
+        }
+
+        logger.trace(`Returning ${accounts.length} token accounts (including closed ones)`);
+
+        return accounts;
+    }
+
+    private async prepareComputeAmountInput(
+        rawMintAddress: string,
+        rawAmount: string,
+    ): Promise<{ poolKeys: LiquidityPoolKeysV4; poolInfo: LiquidityPoolInfo; amount: TokenAmount }> {
+        const mint = new PublicKey(rawMintAddress);
+        const poolData = await this.poolStorage.get(rawMintAddress);
+        const market = await this.marketStorage.get(poolData.state.marketId);
+        const poolKeys = createPoolKeys(new PublicKey(poolData.id), poolData.state, market);
+        const poolInfo = await Liquidity.fetchInfo({
+            connection: this.connection,
+            poolKeys,
+        });
+        const tokenToSell = new Token(TOKEN_PROGRAM_ID, mint, Number(poolData.state.baseDecimal));
+        const amount = new TokenAmount(tokenToSell, BigInt(rawAmount), true);
+        return { poolKeys, poolInfo, amount };
+    }
+
+    private async prepareMultipleComputeAmountInputs(
         rawMintAddresses: string[],
-        rawAmountsToSell: string[],
-    ): Promise<SwapExecutionInfoJSON[]> {
+        rawAmounts: string[],
+    ): Promise<{ poolsKeys: LiquidityPoolKeysV4[]; poolsInfos: LiquidityPoolInfo[]; amounts: TokenAmount[] }> {
         const mints = rawMintAddresses.map((rawMintAddress) => new PublicKey(rawMintAddress));
         const poolsDatas = await this.poolStorage.getMultiple(rawMintAddresses);
         const marketIds = poolsDatas.map(({ state: { marketId } }) => marketId);
@@ -388,47 +331,21 @@ export class Wallet {
             pools: poolsKeys,
         });
         logger.debug(`Fetched multiple infos ${poolsInfos.length}`);
-        const slippagePercent = new Percent(this.config.sellSlippage, 100);
         const tokensToSell = zip(mints, poolsDatas).map(
             ([mint, poolData]) => new Token(TOKEN_PROGRAM_ID, mint, Number(poolData.state.baseDecimal)),
         );
-        const amountsIn = zip(tokensToSell, rawAmountsToSell).map(
+        const amounts = zip(tokensToSell, rawAmounts).map(
             ([tokenToSell, rawAmountToSell]) => new TokenAmount(tokenToSell, BigInt(rawAmountToSell), true),
         );
-        const resps = zip(poolsKeys, poolsInfos, amountsIn).map(([poolKeys, poolInfo, amountIn]) =>
-            Liquidity.computeAmountOut({
-                poolKeys,
-                poolInfo,
-                amountIn,
-                currencyOut: this.config.quoteToken,
-                slippage: slippagePercent,
-            }),
-        );
-        return resps.map(({ amountOut, minAmountOut, currentPrice, executionPrice, fee }) => ({
-            amountOut: safeFractionToFixed(amountOut),
-            minAmountOut: safeFractionToFixed(minAmountOut),
-            currentPrice: safeFractionToFixed(currentPrice),
-            executionPrice: executionPrice ? safeFractionToFixed(executionPrice) : null,
-            fee: safeFractionToFixed(fee),
-        }));
+        return { poolsKeys, poolsInfos, amounts };
     }
 
-    async getTokenSellExecutionInfo(rawMintAddress: string, rawAmountToSell: string): Promise<SwapExecutionInfoJSON> {
-        const mint = new PublicKey(rawMintAddress);
-        const poolData = await this.poolStorage.get(rawMintAddress);
-        const market = await this.marketStorage.get(poolData.state.marketId);
-        const poolKeys = createPoolKeys(new PublicKey(poolData.id), poolData.state, market);
-        const poolInfo = await Liquidity.fetchInfo({
-            connection: this.connection,
-            poolKeys,
-        });
+    private executeComputeAmountOut(poolKeys: LiquidityPoolKeysV4, poolInfo: LiquidityPoolInfo, amount: TokenAmount) {
         const slippagePercent = new Percent(this.config.sellSlippage, 100);
-        const tokenToSell = new Token(TOKEN_PROGRAM_ID, mint, Number(poolData.state.baseDecimal));
-        const amountIn = new TokenAmount(tokenToSell, BigInt(rawAmountToSell), true);
         const resp = Liquidity.computeAmountOut({
             poolKeys,
             poolInfo,
-            amountIn,
+            amountIn: amount,
             currencyOut: this.config.quoteToken,
             slippage: slippagePercent,
         });
@@ -441,7 +358,60 @@ export class Wallet {
         };
     }
 
-    private getAtaTransactionsFromStorage(ata: PublicKey): ParsedTransactionWithMeta[] {
+    private executeComputeAmountIn(poolKeys: LiquidityPoolKeysV4, poolInfo: LiquidityPoolInfo, amount: TokenAmount) {
+        const slippagePercent = new Percent(this.config.buySlippage, 100);
+        const resp = Liquidity.computeAmountIn({
+            poolKeys,
+            poolInfo,
+            amountOut: amount,
+            currencyIn: this.config.quoteToken,
+            slippage: slippagePercent,
+        });
+        return {
+            amountIn: safeFractionToFixed(resp.amountIn),
+            maxAmountIn: safeFractionToFixed(resp.maxAmountIn),
+            currentPrice: safeFractionToFixed(resp.currentPrice),
+            executionPrice: resp.executionPrice ? safeFractionToFixed(resp.executionPrice) : null,
+        };
+    }
+
+    async getTokenSellExecutionInfo(rawMintAddress: string, rawAmountToSell: string): Promise<SellExecutionInfoJSON> {
+        const { poolKeys, poolInfo, amount } = await this.prepareComputeAmountInput(rawMintAddress, rawAmountToSell);
+        return this.executeComputeAmountOut(poolKeys, poolInfo, amount);
+    }
+
+    async getTokenBuyExecutionInfo(rawMintAddress: string, rawAmountToBuy: string): Promise<BuyExecutionInfoJSON> {
+        const { poolKeys, poolInfo, amount } = await this.prepareComputeAmountInput(rawMintAddress, rawAmountToBuy);
+        return this.executeComputeAmountIn(poolKeys, poolInfo, amount);
+    }
+
+    async getMultipleTokenSellExecutionInfo(
+        rawMintAddresses: string[],
+        rawAmountsToSell: string[],
+    ): Promise<SellExecutionInfoJSON[]> {
+        const { poolsKeys, poolsInfos, amounts } = await this.prepareMultipleComputeAmountInputs(
+            rawMintAddresses,
+            rawAmountsToSell,
+        );
+        return zip(poolsKeys, poolsInfos, amounts).map(([poolKeys, poolInfo, amount]) =>
+            this.executeComputeAmountOut(poolKeys, poolInfo, amount),
+        );
+    }
+
+    async getMultipleTokenBuyExecutionInfo(
+        rawMintAddresses: string[],
+        rawAmountsToBuy: string[],
+    ): Promise<BuyExecutionInfoJSON[]> {
+        const { poolsKeys, poolsInfos, amounts } = await this.prepareMultipleComputeAmountInputs(
+            rawMintAddresses,
+            rawAmountsToBuy,
+        );
+        return zip(poolsKeys, poolsInfos, amounts).map(([poolKeys, poolInfo, amount]) =>
+            this.executeComputeAmountIn(poolKeys, poolInfo, amount),
+        );
+    }
+
+    private getStoredAtaTransactions(ata: PublicKey): ParsedTransactionWithMeta[] {
         if (!this.walletTxs) {
             throw new Error(
                 `Cannot get transaction for ata ${ata}, because no transactions were fetched for the storage`,
@@ -453,10 +423,17 @@ export class Wallet {
     }
 
     private async getAtaTransactions(ata: PublicKey): Promise<ParsedTransactionWithMeta[]> {
-        if (this.walletTxs) {
-            return this.getAtaTransactionsFromStorage(ata);
-        }
         const connection = this.privateConnection ?? this.connection;
+        if (this.walletTxs) {
+            const storedAtaTransactionsWithMeta = this.getStoredAtaTransactions(ata);
+            const newestTxSig = storedAtaTransactionsWithMeta[0].transaction.signatures[0];
+            const newerAtaTransactions = await confirmedTxSignaturesForAccount(connection, ata, newestTxSig);
+            const newerAtaTransactionsWithMeta = await transactionsWithMetaFromSignatures(
+                connection,
+                newerAtaTransactions,
+            );
+            return newerAtaTransactionsWithMeta.concat(storedAtaTransactionsWithMeta);
+        }
         const confirmedSignatures = await confirmedTxSignaturesForAccount(connection, ata);
         return await transactionsWithMetaFromSignatures(connection, confirmedSignatures);
     }
@@ -468,13 +445,12 @@ export class Wallet {
         const owner = this.config.account.publicKey;
 
         return zip(mints, atas).map(([mint, ata]) => {
-            const txsWithMeta = this.getAtaTransactionsFromStorage(ata);
+            const txsWithMeta = this.getStoredAtaTransactions(ata);
             return transformTransactions(txsWithMeta, mint.toString(), owner.toString());
         });
     }
 
     async getAtaBuyAndSellTransactions(rawMintAddress: string, rawAtaAddress: string) {
-        const mint = new PublicKey(rawMintAddress);
         const ata = new PublicKey(rawAtaAddress);
 
         const owner = this.config.account.publicKey;
@@ -482,6 +458,132 @@ export class Wallet {
 
         const txsWithMeta = await this.getAtaTransactions(ata);
         return transformTransactions(txsWithMeta, rawMintAddress, rawOwnerAddress);
+    }
+
+    // TODO: after confirming, update this.walletTxs and this.walletTxSignatures
+    async sellAll(rawMintAddress: string, rawAtaAddress: string) {
+        const ata = new PublicKey(rawAtaAddress);
+
+        const tokenAccountInfo = await this.connection.getAccountInfo(ata, this.connection.commitment);
+
+        if (tokenAccountInfo == null) {
+            logger.error('No ATA exists for this token mint, exiting...');
+            process.exit(1);
+        }
+
+        const tokenAccountData = AccountLayout.decode(tokenAccountInfo.data);
+
+        const poolData = await this.poolStorage.get(rawMintAddress);
+        const market = await this.marketStorage.get(poolData.state.marketId);
+        const poolKeys = createPoolKeys(new PublicKey(poolData.id), poolData.state, market);
+
+        const token = new Token(TOKEN_PROGRAM_ID, poolKeys.baseMint, poolKeys.baseDecimals);
+        const tokenAmount = new TokenAmount(token, tokenAccountData.amount, true);
+
+        const result = await this.swap(poolKeys, token, ata, tokenAmount, 'sell');
+
+        if (result.confirmed) {
+            logger.info(
+                {
+                    mint: rawMintAddress,
+                    signature: result.signature,
+                    url: `https://solscan.io/tx/${result.signature}?cluster=${NETWORK}`,
+                },
+                `Confirmed sell tx`,
+            );
+
+            return;
+        }
+
+        logger.info(
+            {
+                mint: rawMintAddress,
+                signature: result.signature,
+                error: result.error,
+            },
+            `Error confirming sell tx`,
+        );
+
+        throw new Error(`Error confirming sell tx: ${result.error}`);
+    }
+
+    private async swap(
+        poolKeys: LiquidityPoolKeysV4,
+        token: Token,
+        tokenAta: PublicKey,
+        amountIn: TokenAmount,
+        direction: 'buy' | 'sell',
+    ) {
+        const ataDonor = direction === 'buy' ? this.config.quoteAta : tokenAta;
+        const ataRecipient = direction === 'buy' ? tokenAta : this.config.quoteAta;
+        const tokenReceiving = direction === 'buy' ? token : this.config.quoteToken;
+        const slippage = direction === 'buy' ? this.config.buySlippage : this.config.sellSlippage;
+        const slippagePercent = new Percent(slippage, 100);
+        const poolInfo = await Liquidity.fetchInfo({
+            connection: this.connection,
+            poolKeys,
+        });
+
+        const computedAmountOut = Liquidity.computeAmountOut({
+            poolKeys,
+            poolInfo,
+            amountIn,
+            currencyOut: tokenReceiving,
+            slippage: slippagePercent,
+        });
+
+        const latestBlockhash = await this.connection.getLatestBlockhash();
+        const { innerTransaction } = Liquidity.makeSwapFixedInInstruction(
+            {
+                poolKeys: poolKeys,
+                userKeys: {
+                    tokenAccountIn: ataDonor,
+                    tokenAccountOut: ataRecipient,
+                    owner: this.config.account.publicKey,
+                },
+                amountIn: amountIn.raw,
+                minAmountOut: computedAmountOut.minAmountOut.raw,
+            },
+            poolKeys.version,
+        );
+
+        const messageV0 = new TransactionMessage({
+            payerKey: this.config.account.publicKey,
+            recentBlockhash: latestBlockhash.blockhash,
+
+            instructions: [
+                ...(this.isWarp || this.isJito
+                    ? []
+                    : [
+                          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: this.config.unitPrice }),
+                          ComputeBudgetProgram.setComputeUnitLimit({ units: this.config.unitLimit }),
+                      ]),
+                ...(direction === 'buy'
+                    ? [
+                          createAssociatedTokenAccountIdempotentInstruction(
+                              this.config.account.publicKey,
+                              tokenAta,
+                              this.config.account.publicKey,
+                              token.mint,
+                          ),
+                      ]
+                    : []),
+                ...innerTransaction.instructions,
+                ...(direction === 'sell'
+                    ? [
+                          createCloseAccountInstruction(
+                              tokenAta,
+                              this.config.account.publicKey,
+                              this.config.account.publicKey,
+                          ),
+                      ]
+                    : []),
+            ],
+        }).compileToV0Message();
+        const transaction = new VersionedTransaction(messageV0);
+        transaction.sign([this.config.account, ...innerTransaction.signers]);
+        const skipPreflight = { buy: this.config.buySkipPreflight, sell: this.config.sellSkipPreflight }[direction];
+        return this.txExecutor.executeAndConfirm(transaction, this.config.account, latestBlockhash, skipPreflight);
     }
 }
 //TODO: cache all account transactions in a database
